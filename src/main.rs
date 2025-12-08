@@ -1,6 +1,7 @@
 mod config;
 mod models;
 mod nse_client;
+mod processor;
 
 use anyhow::Result;
 use colored::Colorize;
