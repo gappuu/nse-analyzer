@@ -1,3 +1,4 @@
+use crate::config;
 use crate::models::{ContractInfo, OptionChain, Security, SecurityType};
 use anyhow::{Context, Result};
 use rand::{seq::SliceRandom, thread_rng};
@@ -35,13 +36,13 @@ impl NSEClient {
         let mut warmed = self.warmed_up.write().await;
         if !*warmed {
             let _ = self.client
-                .get("https://www.nseindia.com")
-                .header("Accept", "text/html")
+                .get(config::NSE_BASE_URL)
+                .header("Accept", config::HEADER_ACCEPT_HTML)
                 .send()
                 .await
                 .context("Failed to warm up NSE session")?;
             
-            tokio::time::sleep(Duration::from_millis(200)).await;
+            tokio::time::sleep(Duration::from_millis(config::WARMUP_DELAY_MS)).await;
             *warmed = true;
         }
         
@@ -52,16 +53,16 @@ impl NSEClient {
     async fn fetch_json(&self, url: &str) -> Result<String> {
         self.warmup_if_needed().await?;
 
-        let backoff = ExponentialBackoff::from_millis(200)
-            .factor(3)
-            .max_delay(Duration::from_secs(5))
-            .take(5);
+        let backoff = ExponentialBackoff::from_millis(config::RETRY_BASE_DELAY_MS)
+            .factor(config::RETRY_FACTOR)
+            .max_delay(Duration::from_secs(config::RETRY_MAX_DELAY_SECS))
+            .take(config::RETRY_MAX_ATTEMPTS);
 
         Retry::spawn(backoff, || async {
             let res = self.client
                 .get(url)
-                .header("Referer", "https://www.nseindia.com/")
-                .header("X-Requested-With", "XMLHttpRequest")
+                .header("Referer", config::HEADER_REFERER)
+                .header("X-Requested-With", config::HEADER_X_REQUESTED_WITH)
                 .send()
                 .await
                 .context("Request send failed")?;
@@ -97,8 +98,7 @@ impl NSEClient {
     // STEP 1: FETCH FNO LIST
     // -----------------------------------------------
     pub async fn fetch_fno_list(&self) -> Result<Vec<Security>> {
-        let url = "https://www.nseindia.com/api/master-quote";
-        let text = self.fetch_json(url).await?;
+        let text = self.fetch_json(config::NSE_API_MASTER_QUOTE).await?;
         
         let symbols: Vec<String> = serde_json::from_str(&text)
             .context("Failed to parse FNO list")?;
@@ -109,9 +109,9 @@ impl NSEClient {
             .collect();
         
         // Add indices
-        securities.push(Security::index("NIFTY".to_string()));
-        securities.push(Security::index("BANKNIFTY".to_string()));
-        securities.push(Security::index("FINNIFTY".to_string()));
+        for index in config::NSE_INDICES {
+            securities.push(Security::index(index.to_string()));
+        }
         
         Ok(securities)
     }
@@ -120,11 +120,7 @@ impl NSEClient {
     // STEP 2: FETCH CONTRACT INFO
     // -----------------------------------------------
     pub async fn fetch_contract_info(&self, symbol: &str) -> Result<ContractInfo> {
-        let url = format!(
-            "https://www.nseindia.com/api/option-chain-contract-info?symbol={}",
-            symbol
-        );
-        
+        let url = config::nse_contract_info_url(symbol);
         let text = self.fetch_json(&url).await?;
         let info: ContractInfo = serde_json::from_str(&text)
             .context("Failed to parse contract info")?;
@@ -145,11 +141,7 @@ impl NSEClient {
             SecurityType::Indices => "Indices",
         };
         
-        let url = format!(
-            "https://www.nseindia.com/api/option-chain-v3?type={}&symbol={}&expiry={}",
-            typ, security.symbol, expiry
-        );
-        
+        let url = config::nse_option_chain_url(typ, &security.symbol, expiry);
         let text = self.fetch_json(&url).await?;
         let chain: OptionChain = serde_json::from_str(&text)
             .context("Failed to parse option chain")?;
@@ -214,8 +206,7 @@ fn build_client() -> Result<Client> {
     let mut headers = header::HeaderMap::new();
     
     // Rotating Accept-Language headers (fingerprint avoidance)
-    let langs = ["en-US,en;q=0.9", "en-GB,en;q=0.8", "en-IN,en;q=0.9"];
-    let lang = langs.choose(&mut thread_rng()).unwrap();
+    let lang = config::ACCEPT_LANGUAGES.choose(&mut thread_rng()).unwrap();
     headers.insert(
         header::ACCEPT_LANGUAGE, 
         header::HeaderValue::from_str(lang)?
@@ -225,12 +216,8 @@ fn build_client() -> Result<Client> {
     Ok(Client::builder()
         .default_headers(headers)
         .cookie_store(true) // crucial for NSE
-        .user_agent(
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) \
-             AppleWebKit/537.36 (KHTML, like Gecko) \
-             Chrome/131.0.0.0 Safari/537.36",
-        )
-        .timeout(Duration::from_secs(20))
+        .user_agent(config::USER_AGENT)
+        .timeout(config::HTTP_TIMEOUT)
         .build()
         .context("Failed to build HTTP client")?)
 }

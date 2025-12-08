@@ -12,6 +12,7 @@ anyhow = "1"
 colored = "2"
 tokio-retry = "0.3"
 rand = "0.8"
+urlencoding = "2"
 
 # Optional: logging
 tracing = "0.1"
