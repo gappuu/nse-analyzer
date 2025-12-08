@@ -96,23 +96,30 @@ async fn run_batch() -> Result<()> {
 
     // Step 5: Save to JSON
     println!("{}", "Saving results to output.json...".cyan());
+
     
     let data_batch: Vec<serde_json::Value> = successful
         .iter()
         .map(|(security, chain)| {
+
+            let processed_data = processor::process_option_data(
+                chain.filtered.data.clone(),
+                chain.records.underlying_value,
+            );
+
             serde_json::json!({
                 "record": {
                     "symbol": security.symbol,
-                    "type": match security.security_type {
-                        models::SecurityType::Equity => "Equity",
-                        models::SecurityType::Indices => "Indices",
-                        },
+                    // "type": match security.security_type {
+                    //     models::SecurityType::Equity => "Equity",
+                    //     models::SecurityType::Indices => "Indices",
+                    //     },
                     "timestamp": chain.records.timestamp,
                     "underlying_value": chain.records.underlying_value,
                     "ce_oi": chain.filtered.ce_totals.total_oi,
                     "pe_oi": chain.filtered.pe_totals.total_oi,
                 },
-                "data": chain.filtered.data,
+                "data": processed_data,
             })
         })
         .collect();
@@ -168,6 +175,11 @@ async fn run_single(symbol: &str, expiry: &str) -> Result<()> {
     println!("{} Total strikes: {}", "✓".green(), chain.filtered.data.len());
     println!();
 
+    let processed_data = processor::process_option_data(
+    chain.filtered.data, 
+    chain.records.underlying_value
+    );
+
     // Save to JSON
     let data_single = serde_json::json!({
         "record": {
@@ -177,12 +189,12 @@ async fn run_single(symbol: &str, expiry: &str) -> Result<()> {
             "ce_oi": chain.filtered.ce_totals.total_oi,
             "pe_oi": chain.filtered.pe_totals.total_oi,
             "symbol": symbol,
-            "type": match security.security_type {
-                models::SecurityType::Equity => "Equity",
-                models::SecurityType::Indices => "Indices",
-                },
+            // "type": match security.security_type {
+            //     models::SecurityType::Equity => "Equity",
+            //     models::SecurityType::Indices => "Indices",
+            //     },
         },
-        "data": chain.filtered.data,
+        "data": processed_data,
     });
 
     std::fs::write(
@@ -202,7 +214,7 @@ async fn main() -> Result<()> {
     // CONFIGURATION - EDIT THIS SECTION
     // ========================================
     
-    let mode = "single"; // Change to "batch" or "single"
+    let mode = "batch"; // Change to "batch" or "single"
     
     // For single mode:
     let symbol = "NIFTY";

@@ -190,10 +190,9 @@ fn calculate_time_value(
 fn filter_strikes(processed: &mut Vec<ProcessedOptionData>, atm_strike: f64) {
     // Sort by strike price
     processed.sort_by(|a, b| {
-        a.strike_price
-            .unwrap_or(0.0)
-            .partial_cmp(&b.strike_price.unwrap_or(0.0))
-            .unwrap()
+        let a_strike = a.strike_price.unwrap_or(0.0);
+        let b_strike = b.strike_price.unwrap_or(0.0);
+        a_strike.partial_cmp(&b_strike).unwrap()
     });
     
     // Find ATM index
@@ -236,13 +235,13 @@ fn filter_strikes(processed: &mut Vec<ProcessedOptionData>, atm_strike: f64) {
 /// Get maximum OI from CE or PE for a strike
 fn get_max_oi(opt: &ProcessedOptionData) -> f64 {
     let ce_oi = opt.call.as_ref()
-        .map(|c| c.base.open_interest)
-        .unwrap_or(Some(0.0));
-    
+        .and_then(|c| c.base.open_interest)   // flatten Option<Option<f64>>
+        .unwrap_or(0.0);                      // final f64
+
     let pe_oi = opt.put.as_ref()
-        .map(|p| p.base.open_interest)
-        .unwrap_or(Some(0.0));
-    
+        .and_then(|p| p.base.open_interest)   // flatten Option<Option<f64>>
+        .unwrap_or(0.0);
+
     ce_oi.max(pe_oi)
 }
 
@@ -298,15 +297,15 @@ mod tests {
     #[test]
     fn test_time_value_calculation() {
         let detail = OptionDetail {
-            identifier: String::new(),
-            strike_price: 100.0,
-            underlying_value: 110.0,
-            open_interest: 1000.0,
-            change_in_oi: 50.0,
-            per_chg_oi: 5.0,
-            last_price: 12.0,
-            price_change: 1.0,
-            per_chg_price: 5.0,
+            // identifier: Some(String::new()),
+            strike_price: Some(100.0),
+            underlying_value: Some(110.0),
+            open_interest: Some(1000.0),
+            change_in_oi: Some(50.0),
+            per_chg_oi: Some(5.0),
+            last_price: Some(12.0),
+            price_change: Some(1.0),
+            per_chg_price: Some(5.0),
         };
         
         // CE: underlying (110) > strike (100), so time_val = 12 - (110-100) = 2

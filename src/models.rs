@@ -93,8 +93,8 @@ pub struct OptionData {
 /// Detailed option information (CE or PE)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OptionDetail {
-    #[serde(default)]
-    pub identifier: Option<String>,  
+    // #[serde(default)]
+    // pub identifier: Option<String>,  
     
     #[serde(rename = "strikePrice")]
     pub strike_price: Option<f64>,
