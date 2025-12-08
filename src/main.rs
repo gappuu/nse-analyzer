@@ -68,21 +68,6 @@ async fn run_batch() -> Result<()> {
     println!("{} Avg time per security: {:.2}s", "⏱".yellow(), elapsed.as_secs_f64() / securities.len() as f64);
     println!();
 
-    // Show sample successful results
-    if !successful.is_empty() {
-        println!("{}", "Sample Results (first 5):".cyan());
-        for (security, chain) in successful.iter().take(5) {
-            println!(
-                "  {} {} → {} strikes, underlying: {:.2}",
-                "✓".green(),
-                security.symbol.yellow(),
-                chain.filtered.data.len(),
-                chain.records.underlying_value
-            );
-        }
-        println!();
-    }
-
     // Show failed securities
     if !failed.is_empty() {
         println!("{}", "Failed Securities:".red());
@@ -95,48 +80,71 @@ async fn run_batch() -> Result<()> {
         println!();
     }
 
-    // Step 5: Save to JSON
-    println!("{}", "Saving results to output.json...".cyan());
-
+    // Step 5: Process data and run rules
+    println!("{}", "Processing data and applying rules...".cyan());
     
-    let data_batch: Vec<serde_json::Value> = successful
-        .iter()
-        .map(|(security, chain)| {
-
-            let processed_data = processor::process_option_data(
-                chain.filtered.data.clone(),
-                chain.records.underlying_value,
-            );
-
-            serde_json::json!({
-                "record": {
-                    "symbol": security.symbol,
-                    // "type": match security.security_type {
-                    //     models::SecurityType::Equity => "Equity",
-                    //     models::SecurityType::Indices => "Indices",
-                    //     },
-                    "timestamp": chain.records.timestamp,
-                    "underlying_value": chain.records.underlying_value,
-                    "ce_oi": chain.filtered.ce_totals.total_oi,
-                    "pe_oi": chain.filtered.pe_totals.total_oi,
-                },
-                "data": processed_data,
-            })
-        })
-        .collect();
+    // Process each security's data
+    let mut processed_batch = Vec::new();
+    let mut batch_for_rules = Vec::new();
     
-    let output_batch_print = serde_json::json!(data_batch);
-
+    for (security, chain) in successful.iter() {
+        let processed_data = processor::process_option_data(
+            chain.filtered.data.clone(),
+            chain.records.underlying_value
+        );
+        
+        // Store for JSON output
+        processed_batch.push(serde_json::json!({
+            "record": {
+                "symbol": security.symbol,
+                "timestamp": chain.records.timestamp,
+                "underlying_value": chain.records.underlying_value,
+                "ce_oi": chain.filtered.ce_totals.total_oi,
+                "pe_oi": chain.filtered.pe_totals.total_oi,
+            },
+            "data": processed_data.clone(),
+        }));
+        
+        // Store for rules processing
+        batch_for_rules.push((
+            security.symbol.clone(),
+            chain.records.timestamp.clone(),
+            chain.records.underlying_value,
+            processed_data,
+        ));
+    }
+    
+    // Save processed data
+    let output = serde_json::json!(processed_batch);
     std::fs::write(
         "output.json",
-        serde_json::to_string_pretty(&output_batch_print)?,
+        serde_json::to_string_pretty(&output)?,
     )?;
     println!("{} Saved {} securities to output.json", "✓".green(), successful.len());
     
-    println!();
-    println!("{}", "=".repeat(60).blue());
-    println!("{}", "Done!".green().bold());
-    println!("{}", "=".repeat(60).blue());
+    // Run rules on all securities
+    let rules_outputs = rules::run_batch_rules(batch_for_rules);
+    
+    // Save rules output
+    std::fs::write(
+        "batch_rules.json",
+        serde_json::to_string_pretty(&rules_outputs)?,
+    )?;
+    
+    // let total_alerts: usize = rules_outputs.iter()
+    //     .map(|r| r.summary.total_alerts)
+    //     .sum();
+    
+    // println!("{} Saved rules to batch_rules.json", "✓".green());
+    // println!("{} Total alerts across all securities: {}", "ℹ".blue(), total_alerts);
+    
+    // println!("{} Saved rules to batch_rules.json", "✓".green());
+    // println!("{} Total alerts across all securities: {}", "ℹ".blue(), total_alerts);
+    
+    // println!();
+    // println!("{}", "=".repeat(60).blue());
+    // println!("{}", "Done!".green().bold());
+    // println!("{}", "=".repeat(60).blue());
 
     Ok(())
 }
@@ -174,37 +182,42 @@ async fn run_single(symbol: &str, expiry: &str) -> Result<()> {
     println!();
     
     println!("{} Total strikes: {}", "✓".green(), chain.filtered.data.len());
+    println!("{} Total CE OI: {:.0}", "✓".green(), chain.filtered.ce_totals.total_oi);
+    println!("{} Total PE OI: {:.0}", "✓".green(), chain.filtered.pe_totals.total_oi);
     println!();
 
+    // Process the data
     let processed_data = processor::process_option_data(
-    chain.filtered.data, 
-    chain.records.underlying_value
+        chain.filtered.data.clone(),
+        chain.records.underlying_value
     );
 
     // Save to JSON
-    let data_single = serde_json::json!({
-        "record": {
-            "timestamp": chain.records.timestamp,
-            "underlying_value": chain.records.underlying_value,
-            "expiry": expiry,
+    let output = serde_json::json!({
+        "timestamp": chain.records.timestamp,
+        "underlying_value": chain.records.underlying_value,
+        "expiry": expiry,
+        "totals": {
             "ce_oi": chain.filtered.ce_totals.total_oi,
             "pe_oi": chain.filtered.pe_totals.total_oi,
-            "symbol": symbol,
-            // "type": match security.security_type {
-            //     models::SecurityType::Equity => "Equity",
-            //     models::SecurityType::Indices => "Indices",
-            //     },
         },
-        "data": processed_data,
+        "data": [{
+            "symbol": symbol,
+            "type": match security.security_type {
+                models::SecurityType::Equity => "Equity",
+                models::SecurityType::Indices => "Indices",
+            },
+            "data": processed_data,
+        }],
     });
 
     std::fs::write(
         "single_output.json",
-        serde_json::to_string_pretty(&data_single)?,
+        serde_json::to_string_pretty(&output)?,
     )?;
     
     println!("{} Saved to single_output.json", "✓".green());
-
+    
     // Run rules on processed data
     let rules_output = rules::run_rules(
         &processed_data,
@@ -219,9 +232,7 @@ async fn run_single(symbol: &str, expiry: &str) -> Result<()> {
     )?;
     
     println!("{} Saved rules to single_rules.json", "✓".green());
-    println!("{} Total alerts: {}", "ℹ".blue(), rules_output.summary.total_alerts);
-    
-
+    // println!("{} Total alerts: {}", "ℹ".blue(), rules_output.summary.total_alerts);
     println!("{}", "=".repeat(60).blue());
 
     Ok(())
@@ -233,7 +244,7 @@ async fn main() -> Result<()> {
     // CONFIGURATION - EDIT THIS SECTION
     // ========================================
     
-    let mode = "single"; // Change to "batch" or "single"
+    let mode = "batch"; // Change to "batch" or "single"
     
     // For single mode:
     let symbol = "NIFTY";
