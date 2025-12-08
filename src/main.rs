@@ -2,6 +2,7 @@ mod config;
 mod models;
 mod nse_client;
 mod processor;
+mod rules;
 
 use anyhow::Result;
 use colored::Colorize;
@@ -203,6 +204,24 @@ async fn run_single(symbol: &str, expiry: &str) -> Result<()> {
     )?;
     
     println!("{} Saved to single_output.json", "✓".green());
+
+    // Run rules on processed data
+    let rules_output = rules::run_rules(
+        &processed_data,
+        symbol.to_string(),
+        chain.records.timestamp.clone(),
+        chain.records.underlying_value,
+    );
+    
+    std::fs::write(
+        "single_rules.json",
+        serde_json::to_string_pretty(&rules_output)?,
+    )?;
+    
+    println!("{} Saved rules to single_rules.json", "✓".green());
+    println!("{} Total alerts: {}", "ℹ".blue(), rules_output.summary.total_alerts);
+    
+
     println!("{}", "=".repeat(60).blue());
 
     Ok(())
@@ -214,7 +233,7 @@ async fn main() -> Result<()> {
     // CONFIGURATION - EDIT THIS SECTION
     // ========================================
     
-    let mode = "batch"; // Change to "batch" or "single"
+    let mode = "single"; // Change to "batch" or "single"
     
     // For single mode:
     let symbol = "NIFTY";
