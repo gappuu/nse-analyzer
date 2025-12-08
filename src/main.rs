@@ -7,14 +7,13 @@ use colored::Colorize;
 use nse_client::NSEClient;
 use std::sync::Arc;
 
-#[tokio::main]
-async fn main() -> Result<()> {
+/// Run batch fetch for all FNO securities
+async fn run_batch() -> Result<()> {
     println!("{}", "=".repeat(60).blue());
-    println!("{}", "NSE Bulk Processor".green().bold());
+    println!("{}", "NSE Batch Processor".green().bold());
     println!("{}", "=".repeat(60).blue());
     println!();
 
-    // Build NSE client
     let client = Arc::new(NSEClient::new()?);
 
     // Step 1: Fetch all FNO securities
@@ -23,9 +22,8 @@ async fn main() -> Result<()> {
     println!("{} Found {} securities", "✓".green(), securities.len());
     println!();
 
-    // Example 1
     // Step 2: Bulk process all securities
-    println!("{}", "Step 2: Processing all securities (this may take a while)...".cyan());
+    println!("{}", "Step 2: Processing all securities...".cyan());
     println!("{} Max concurrent requests: {}", "ℹ".blue(), config::DEFAULT_MAX_CONCURRENT);
     println!();
 
@@ -47,7 +45,7 @@ async fn main() -> Result<()> {
         match result {
             Ok((_, chain)) => {
                 successful.push((security.clone(), chain.clone()));
-                print!("{}", ".".green()); // Progress indicator
+                print!("{}", ".".green());
             }
             Err(e) => {
                 failed.push((security.symbol.clone(), e.to_string()));
@@ -76,7 +74,7 @@ async fn main() -> Result<()> {
                 "  {} {} → {} strikes, underlying: {:.2}",
                 "✓".green(),
                 security.symbol.yellow(),
-                chain.records.data.len(),
+                chain.filtered.data.len(),
                 chain.records.underlying_value
             );
         }
@@ -95,7 +93,7 @@ async fn main() -> Result<()> {
         println!();
     }
 
-    // Step 5: Save to JSON (optional)
+    // Step 5: Save to JSON
     println!("{}", "Saving results to output.json...".cyan());
     let output: Vec<serde_json::Value> = successful
         .iter()
@@ -108,10 +106,8 @@ async fn main() -> Result<()> {
                 },
                 "underlying": chain.records.underlying_value,
                 "timestamp": chain.records.timestamp,
-                "strikes_count": chain.records.data.len(),
-                // Add your analysis here:
-                // "pcr": calculate_pcr(chain),
-                // "max_pain": calculate_max_pain(chain),
+                "strikes_count": chain.filtered.data.len(),
+                "data": chain.filtered.data,
             })
         })
         .collect();
@@ -127,20 +123,100 @@ async fn main() -> Result<()> {
     println!("{}", "Done!".green().bold());
     println!("{}", "=".repeat(60).blue());
 
-    // Example 2: Fetch contract info for one symbol
-    // println!("{}", "Step 2: Fetching contract info for M&M...".cyan());
-    // let contract_info = client.fetch_contract_info("M&M").await?;
-    // println!("{} Expiries: {:?}", "✓".green(), &contract_info.expiry_dates[..3.min(contract_info.expiry_dates.len())]);
-    // println!();
+    Ok(())
+}
 
-    // // Example 3: Fetch option chain for one symbol
-    // println!("{}", "Step 3: Fetching option chain for M&M...".cyan());
-    // let ticker = models::Security::index("M&M".to_string());
-    // let expiry = &contract_info.expiry_dates[0]; // Nearest expiry
-    // let chain = client.fetch_option_chain(&ticker, expiry).await?;
-    // println!("{} Underlying: {}", "✓".green(), chain.records.underlying_value);
-    // println!("{} Total strikes: {}", "✓".green(), chain.records.data.len());
-    // println!();
+/// Run single security fetch
+async fn run_single(symbol: &str, expiry: &str) -> Result<()> {
+    println!("{}", "=".repeat(60).blue());
+    println!("{}", "NSE Single Security Fetch".green().bold());
+    println!("{}", "=".repeat(60).blue());
+    println!();
+
+    let client = NSEClient::new()?;
+
+    // Determine security type (you can modify this logic)
+    let security = if config::NSE_INDICES.contains(&symbol) {
+        models::Security::index(symbol.to_string())
+    } else {
+        models::Security::equity(symbol.to_string())
+    };
+
+    println!("{} Fetching option chain for {}...", "→".cyan(), symbol.yellow());
+    println!("{} Expiry: {}", "→".cyan(), expiry.yellow());
+    println!();
+
+    let chain = client.fetch_option_chain(&security, expiry).await?;
+
+    // Display results
+    println!("{}", "=".repeat(60).blue());
+    println!("{}", "Results".cyan().bold());
+    println!("{}", "=".repeat(60).blue());
+    println!("{} Symbol: {}", "✓".green(), symbol.yellow());
+    println!("{} Timestamp: {}", "✓".green(), chain.records.timestamp);
+    println!("{} Underlying: {:.2}", "✓".green(), chain.records.underlying_value);
+    println!("{} Expiry: {}", "✓".green(), expiry);
+    println!();
+    
+    println!("{} Total strikes: {}", "✓".green(), chain.filtered.data.len());
+    println!("{} Total CE OI: {:.0}", "✓".green(), chain.filtered.ce_totals.total_oi);
+    println!("{} Total PE OI: {:.0}", "✓".green(), chain.filtered.pe_totals.total_oi);
+    println!("{} Total CE Volume: {:.0}", "✓".green(), chain.filtered.ce_totals.total_volume);
+    println!("{} Total PE Volume: {:.0}", "✓".green(), chain.filtered.pe_totals.total_volume);
+    println!();
+
+    // Save to JSON
+    let output = serde_json::json!({
+        "symbol": symbol,
+        "type": match security.security_type {
+            models::SecurityType::Equity => "Equity",
+            models::SecurityType::Indices => "Indices",
+        },
+        "timestamp": chain.records.timestamp,
+        "underlying_value": chain.records.underlying_value,
+        "expiry": expiry,
+        "totals": {
+            "ce_oi": chain.filtered.ce_totals.total_oi,
+            "pe_oi": chain.filtered.pe_totals.total_oi,
+            "ce_volume": chain.filtered.ce_totals.total_volume,
+            "pe_volume": chain.filtered.pe_totals.total_volume,
+        },
+        "data": chain.filtered.data,
+    });
+
+    std::fs::write(
+        "single_output.json",
+        serde_json::to_string_pretty(&output)?,
+    )?;
+    
+    println!("{} Saved to single_output.json", "✓".green());
+    println!("{}", "=".repeat(60).blue());
+
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    // ========================================
+    // CONFIGURATION - EDIT THIS SECTION
+    // ========================================
+    
+    let mode = "single"; // Change to "batch" or "single"
+    
+    // For single mode:
+    let symbol = "360ONE";
+    let expiry = "30-Dec-2025";
+    
+    // ========================================
+    
+    match mode {
+        "batch" => run_batch().await?,
+        "single" => run_single(symbol, expiry).await?,
+        _ => {
+            eprintln!("Invalid mode. Use 'batch' or 'single'");
+            std::process::exit(1);
+        }
+    }
 
     Ok(())
 }
