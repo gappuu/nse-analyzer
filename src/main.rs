@@ -96,7 +96,7 @@ async fn run_batch() -> Result<()> {
     // Step 5: Save to JSON
     println!("{}", "Saving results to output.json...".cyan());
     
-    let data: Vec<serde_json::Value> = successful
+    let data_batch: Vec<serde_json::Value> = successful
         .iter()
         .map(|(security, chain)| {
             serde_json::json!({
@@ -116,11 +116,11 @@ async fn run_batch() -> Result<()> {
         })
         .collect();
     
-    let output = serde_json::json!(data);
+    let output_batch_print = serde_json::json!(data_batch);
 
     std::fs::write(
         "output.json",
-        serde_json::to_string_pretty(&output)?,
+        serde_json::to_string_pretty(&output_batch_print)?,
     )?;
     println!("{} Saved {} securities to output.json", "✓".green(), successful.len());
     
@@ -168,7 +168,7 @@ async fn run_single(symbol: &str, expiry: &str) -> Result<()> {
     println!();
 
     // Save to JSON
-    let output = serde_json::json!({
+    let data_single = serde_json::json!({
         "record": {
             "timestamp": chain.records.timestamp,
             "underlying_value": chain.records.underlying_value,
@@ -186,7 +186,7 @@ async fn run_single(symbol: &str, expiry: &str) -> Result<()> {
 
     std::fs::write(
         "single_output.json",
-        serde_json::to_string_pretty(&output)?,
+        serde_json::to_string_pretty(&data_single)?,
     )?;
     
     println!("{} Saved to single_output.json", "✓".green());
@@ -201,7 +201,7 @@ async fn main() -> Result<()> {
     // CONFIGURATION - EDIT THIS SECTION
     // ========================================
     
-    let mode = "batch"; // Change to "batch" or "single"
+    let mode = "single"; // Change to "batch" or "single"
     
     // For single mode:
     let symbol = "NIFTY";
