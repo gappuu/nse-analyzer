@@ -94,7 +94,7 @@ pub struct OptionData {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OptionDetail {
     #[serde(default)]
-    pub identifier: Option<String>,  // Made optional - can be null or missing
+    pub identifier: Option<String>,  
     
     #[serde(rename = "strikePrice")]
     pub strike_price: Option<f64>,
@@ -111,7 +111,12 @@ pub struct OptionDetail {
     #[serde(rename = "lastPrice")]
     pub last_price: Option<f64>,
     
-    pub change: Option<f64>,
-    
-    pub pchange: Option<f64>,
+     #[serde(rename = "change")]
+    pub price_change: Option<f64>,
+
+     #[serde(rename = "pchange")]
+    pub per_chg_price: Option<f64>,
+
+     #[serde(rename = "pchangeinOpenInterest")]
+    pub per_chg_oi: Option<f64>,
 }
