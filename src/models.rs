@@ -72,9 +72,6 @@ pub struct FilteredData {
 pub struct OptionTotals {
     #[serde(rename = "totOI")]
     pub total_oi: f64,
-    
-    #[serde(rename = "totVol")]
-    pub total_volume: f64,
 }
 
 /// Option data for each strike price

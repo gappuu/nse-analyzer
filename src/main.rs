@@ -95,22 +95,28 @@ async fn run_batch() -> Result<()> {
 
     // Step 5: Save to JSON
     println!("{}", "Saving results to output.json...".cyan());
-    let output: Vec<serde_json::Value> = successful
+    
+    let data: Vec<serde_json::Value> = successful
         .iter()
         .map(|(security, chain)| {
             serde_json::json!({
-                "symbol": security.symbol,
-                "type": match security.security_type {
-                    models::SecurityType::Equity => "Equity",
-                    models::SecurityType::Indices => "Indices",
+                "record": {
+                    "symbol": security.symbol,
+                    "type": match security.security_type {
+                        models::SecurityType::Equity => "Equity",
+                        models::SecurityType::Indices => "Indices",
+                        },
+                    "timestamp": chain.records.timestamp,
+                    "underlying_value": chain.records.underlying_value,
+                    "ce_oi": chain.filtered.ce_totals.total_oi,
+                    "pe_oi": chain.filtered.pe_totals.total_oi,
                 },
-                "underlying": chain.records.underlying_value,
-                "timestamp": chain.records.timestamp,
-                "strikes_count": chain.filtered.data.len(),
                 "data": chain.filtered.data,
             })
         })
         .collect();
+    
+    let output = serde_json::json!(data);
 
     std::fs::write(
         "output.json",
@@ -159,27 +165,21 @@ async fn run_single(symbol: &str, expiry: &str) -> Result<()> {
     println!();
     
     println!("{} Total strikes: {}", "✓".green(), chain.filtered.data.len());
-    println!("{} Total CE OI: {:.0}", "✓".green(), chain.filtered.ce_totals.total_oi);
-    println!("{} Total PE OI: {:.0}", "✓".green(), chain.filtered.pe_totals.total_oi);
-    println!("{} Total CE Volume: {:.0}", "✓".green(), chain.filtered.ce_totals.total_volume);
-    println!("{} Total PE Volume: {:.0}", "✓".green(), chain.filtered.pe_totals.total_volume);
     println!();
 
     // Save to JSON
     let output = serde_json::json!({
-        "symbol": symbol,
-        "type": match security.security_type {
-            models::SecurityType::Equity => "Equity",
-            models::SecurityType::Indices => "Indices",
-        },
-        "timestamp": chain.records.timestamp,
-        "underlying_value": chain.records.underlying_value,
-        "expiry": expiry,
-        "totals": {
+        "record": {
+            "timestamp": chain.records.timestamp,
+            "underlying_value": chain.records.underlying_value,
+            "expiry": expiry,
             "ce_oi": chain.filtered.ce_totals.total_oi,
             "pe_oi": chain.filtered.pe_totals.total_oi,
-            "ce_volume": chain.filtered.ce_totals.total_volume,
-            "pe_volume": chain.filtered.pe_totals.total_volume,
+            "symbol": symbol,
+            "type": match security.security_type {
+                models::SecurityType::Equity => "Equity",
+                models::SecurityType::Indices => "Indices",
+                },
         },
         "data": chain.filtered.data,
     });
@@ -201,11 +201,11 @@ async fn main() -> Result<()> {
     // CONFIGURATION - EDIT THIS SECTION
     // ========================================
     
-    let mode = "single"; // Change to "batch" or "single"
+    let mode = "batch"; // Change to "batch" or "single"
     
     // For single mode:
-    let symbol = "360ONE";
-    let expiry = "30-Dec-2025";
+    let symbol = "NIFTY";
+    let expiry = "09-Dec-2025";
     
     // ========================================
     
