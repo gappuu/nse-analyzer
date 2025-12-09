@@ -69,6 +69,23 @@ pub fn run_rules(
     if alerts.is_empty() {
         return None;
     }
+
+    // valid the_money values
+    const VALID_MONEY: [&str; 7] = ["ATM", "1 OTM", "1 ITM", "2 OTM", "2 ITM", "3 OTM", "3 ITM"];
+
+    // Filter alerts based on the_money values
+    alerts.retain(|a| {
+        if let Some(ref m) = a.values.the_money {
+            VALID_MONEY.contains(&m.as_str())
+        } else {
+            false
+        }
+    });
+
+    // Skip after filter too
+    if alerts.is_empty() {
+        return None;
+    }
     
     Some(RulesOutput {
         symbol,
