@@ -1,6 +1,6 @@
 use crate::config;
 use crate::models::{ContractInfo, OptionChain, Security, SecurityType};
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use rand::{seq::SliceRandom, thread_rng};
 use reqwest::{header, Client, StatusCode};
 use std::sync::Arc;
@@ -8,6 +8,8 @@ use std::time::Duration;
 use tokio::sync::{Semaphore, RwLock};
 use tokio_retry::strategy::ExponentialBackoff;
 use tokio_retry::Retry;
+use chrono::{NaiveDate, NaiveTime, Local};
+
 
 // -----------------------------------------------
 // CLIENT WRAPPER WITH SESSION STATE
@@ -16,6 +18,58 @@ pub struct NSEClient {
     client: Client,
     warmed_up: Arc<RwLock<bool>>,
 }
+
+fn select_expiry<'a>(expiry_dates: &'a [String]) -> Result<&'a String> {
+        if expiry_dates.is_empty() {
+            return Err(anyhow!("No expiry dates found"));
+        }
+
+        // 1) Parse all dates and keep their original indices
+        let mut parsed: Vec<(NaiveDate, usize)> = Vec::new();
+
+        for (idx, s) in expiry_dates.iter().enumerate() {
+            let d = NaiveDate::parse_from_str(s, "%d-%b-%Y")
+                .with_context(|| format!("Failed to parse expiry date: {}", s))?;
+            parsed.push((d, idx));
+        }
+
+        // 2) Sort by date (earliest first)
+        parsed.sort_by_key(|(d, _)| *d);
+
+        // 3) Get today's date and current time
+        let now = Local::now();
+        let today = now.date_naive();
+        let current_time = now.time();
+        let cutoff = NaiveTime::from_hms_opt(15, 30, 0).unwrap(); // 15:30
+
+        // 4) Apply your rules while scanning sorted expiries
+        for (date, idx) in parsed {
+            if date < today {
+                // Rule 3: past date → skip, try next
+                continue;
+            }
+
+            if date == today {
+                // Rule 1 & 4: today’s expiry
+                if current_time < cutoff {
+                    // Before 15:30 → use today
+                    return Ok(&expiry_dates[idx]);
+                } else {
+                    // After 15:30 → skip today, try next
+                    continue;
+                }
+            }
+
+            // Rule 2: future date (> today) → use it
+            if date > today {
+                return Ok(&expiry_dates[idx]);
+            }
+        }
+
+        // If we reach here, all expiries were invalid (past or today after cutoff)
+        Err(anyhow!("No valid expiry found (all past or after cutoff)"))
+    }
+
 
 impl NSEClient {
     pub fn new() -> Result<Self> {
@@ -94,6 +148,7 @@ impl NSEClient {
         .await
     }
 
+    
     // -----------------------------------------------
     // STEP 1: FETCH FNO LIST
     // -----------------------------------------------
@@ -172,11 +227,13 @@ impl NSEClient {
                 // Get contract info
                 let contract_info = client.fetch_contract_info(&security.symbol).await?;
                 
-                // Use nearest (first) expiry
-                let expiry = contract_info
-                    .expiry_dates
-                    .first()
-                    .context("No expiry dates found")?;
+                // // Use nearest (first) expiry
+                // let expiry = contract_info
+                //     .expiry_dates
+                //     .first()
+                //     .context("No expiry dates found")?;
+
+                let expiry = select_expiry(&contract_info.expiry_dates)?;
 
                 // Get option chain
                 let chain = client.fetch_option_chain(&security, expiry).await?;
