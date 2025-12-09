@@ -88,7 +88,7 @@ async fn run_batch() -> Result<()> {
     let mut batch_for_rules = Vec::new();
     
     for (security, chain) in successful.iter() {
-        let processed_data = processor::process_option_data(
+        let (processed_data, spread) = processor::process_option_data(
             chain.filtered.data.clone(),
             chain.records.underlying_value
         );
@@ -99,6 +99,7 @@ async fn run_batch() -> Result<()> {
                 "symbol": security.symbol,
                 "timestamp": chain.records.timestamp,
                 "underlying_value": chain.records.underlying_value,
+                "spread": spread,
                 "ce_oi": chain.filtered.ce_totals.total_oi,
                 "pe_oi": chain.filtered.pe_totals.total_oi,
             },
@@ -189,7 +190,7 @@ async fn run_single(symbol: &str, expiry: &str) -> Result<()> {
     println!();
 
     // Process the data
-    let processed_data = processor::process_option_data(
+    let (processed_data, spread) = processor::process_option_data(
         chain.filtered.data.clone(),
         chain.records.underlying_value
     );
@@ -199,6 +200,7 @@ async fn run_single(symbol: &str, expiry: &str) -> Result<()> {
         "record": {
             "timestamp": chain.records.timestamp,
             "underlying_value": chain.records.underlying_value,
+            "spread": spread,
             "expiry": expiry,
             "symbol": symbol,
             "ce_oi": chain.filtered.ce_totals.total_oi,
@@ -247,8 +249,8 @@ async fn main() -> Result<()> {
     let mode = "batch"; // Change to "batch" or "single"
     
     // For single mode:
-    let symbol = "NIFTY";
-    let expiry = "09-Dec-2025";
+    let symbol = "COALINDIA";
+    let expiry = "30-Dec-2025";
     
     // ========================================
     
