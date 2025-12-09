@@ -24,6 +24,8 @@ pub struct AlertValues {
     
     #[serde(skip_serializing_if = "Option::is_none")]
     pub the_money: Option<String>,
+
+    pub time_val: f64,
 }
 
 /// Rules output structure
@@ -33,17 +35,6 @@ pub struct RulesOutput {
     pub timestamp: String,
     pub underlying_value: f64,
     pub alerts: Vec<Alert>,
-    pub summary: AlertSummary,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AlertSummary {
-    pub total_alerts: usize,
-    pub huge_oi_increase: usize,     // > 1000%
-    pub huge_oi_decrease: usize,     // < -50%
-    pub low_price_options: usize,    // < 2
-    pub ce_alerts: usize,
-    pub pe_alerts: usize,
 }
 
 /// Run rules on processed option data
@@ -52,7 +43,7 @@ pub fn run_rules(
     symbol: String,
     timestamp: String,
     underlying_value: f64,
-) -> RulesOutput {
+) -> Option<RulesOutput> {
     let mut alerts = Vec::new();
     
     for opt in data {
@@ -69,16 +60,17 @@ pub fn run_rules(
         }
     }
     
-    // Calculate summary
-    let summary = calculate_summary(&alerts);
+    // Skip if no alerts
+    if alerts.is_empty() {
+        return None;
+    }
     
-    RulesOutput {
+    Some(RulesOutput {
         symbol,
         timestamp,
         underlying_value,
         alerts,
-        summary,
-    }
+    })
 }
 
 /// Check rules for a single option (CE or PE)
@@ -107,6 +99,7 @@ fn check_option_rules(
                 last_price,
                 open_interest,
                 the_money: Some(detail.the_money.clone()),
+                time_val: detail.time_val.clone(),
             },
         });
     }
@@ -126,6 +119,7 @@ fn check_option_rules(
                 last_price,
                 open_interest,
                 the_money: Some(detail.the_money.clone()),
+                time_val: detail.time_val.clone(),
             },
         });
     }
@@ -133,58 +127,26 @@ fn check_option_rules(
     // Rule 3: Low price options (< 2)
     if let Some(lp) = last_price {
         if lp > 0.0 && lp < 2.0 {
-            alerts.push(Alert {
-                strike_price: strike,
-                option_type: option_type.to_string(),
-                alert_type: "LOW_PRICE".to_string(),
-                description: format!(
-                    "{} {} strike has low price of ₹{:.2}",
+        alerts.push(Alert {
+            strike_price: strike,
+            option_type: option_type.to_string(),
+            alert_type: "LOW_PRICE".to_string(),
+            description: format!(
+                "{} {} strike has low price of ₹{:.2}",
                     option_type, strike, lp
-                ),
-                values: AlertValues {
-                    pchange_in_oi: Some(pchange_in_oi),
-                    last_price: Some(lp),  // match the Option<f64> field type
-                    open_interest,
-                    the_money: Some(detail.the_money.clone()), // adjust if needed
-                },
-            });
+            ),
+            values: AlertValues {
+                pchange_in_oi: Some(pchange_in_oi),
+                last_price: Some(lp),  
+                open_interest,
+                the_money: Some(detail.the_money.clone()),
+                time_val: detail.time_val.clone(),
+            },
+        });
         }
     }
     
     alerts
-}
-
-/// Calculate summary statistics
-fn calculate_summary(alerts: &[Alert]) -> AlertSummary {
-    let mut huge_oi_increase = 0;
-    let mut huge_oi_decrease = 0;
-    let mut low_price_options = 0;
-    let mut ce_alerts = 0;
-    let mut pe_alerts = 0;
-    
-    for alert in alerts {
-        match alert.alert_type.as_str() {
-            "HUGE_OI_INCREASE" => huge_oi_increase += 1,
-            "HUGE_OI_DECREASE" => huge_oi_decrease += 1,
-            "LOW_PRICE" => low_price_options += 1,
-            _ => {}
-        }
-        
-        match alert.option_type.as_str() {
-            "CE" => ce_alerts += 1,
-            "PE" => pe_alerts += 1,
-            _ => {}
-        }
-    }
-    
-    AlertSummary {
-        total_alerts: alerts.len(),
-        huge_oi_increase,
-        huge_oi_decrease,
-        low_price_options,
-        ce_alerts,
-        pe_alerts,
-    }
 }
 
 /// Run rules on batch data
@@ -193,7 +155,7 @@ pub fn run_batch_rules(
 ) -> Vec<RulesOutput> {
     batch_data
         .into_iter()
-        .map(|(symbol, timestamp, underlying_value, data)| {
+        .filter_map(|(symbol, timestamp, underlying_value, data)| {
             run_rules(&data, symbol, timestamp, underlying_value)
         })
         .collect()

@@ -125,26 +125,30 @@ async fn run_batch() -> Result<()> {
     // Run rules on all securities
     let rules_outputs = rules::run_batch_rules(batch_for_rules);
     
-    // Save rules output
-    std::fs::write(
-        "batch_rules.json",
-        serde_json::to_string_pretty(&rules_outputs)?,
-    )?;
+    if !rules_outputs.is_empty() {
+        std::fs::write(
+            "batch_rules.json",
+            serde_json::to_string_pretty(&rules_outputs)?,
+        )?;
+        
+        let total_alerts: usize = rules_outputs.iter()
+            .map(|r| r.alerts.len())
+            .sum();
+        
+        println!("{} Saved rules to batch_rules.json", "✓".green());
+        println!("{} Securities with alerts: {}", "ℹ".blue(), rules_outputs.len());
+        println!("{} Total alerts: {}", "ℹ".blue(), total_alerts);
+    } else {
+        println!("{} No alerts found across all securities", "ℹ".blue());
+    }
     
-    // let total_alerts: usize = rules_outputs.iter()
-    //     .map(|r| r.summary.total_alerts)
-    //     .sum();
-    
-    // println!("{} Saved rules to batch_rules.json", "✓".green());
+    println!("{} Saved rules to batch_rules.json", "✓".green());
     // println!("{} Total alerts across all securities: {}", "ℹ".blue(), total_alerts);
     
-    // println!("{} Saved rules to batch_rules.json", "✓".green());
-    // println!("{} Total alerts across all securities: {}", "ℹ".blue(), total_alerts);
-    
-    // println!();
-    // println!("{}", "=".repeat(60).blue());
-    // println!("{}", "Done!".green().bold());
-    // println!("{}", "=".repeat(60).blue());
+    println!();
+    println!("{}", "=".repeat(60).blue());
+    println!("{}", "Done!".green().bold());
+    println!("{}", "=".repeat(60).blue());
 
     Ok(())
 }
@@ -181,9 +185,7 @@ async fn run_single(symbol: &str, expiry: &str) -> Result<()> {
     println!("{} Expiry: {}", "✓".green(), expiry);
     println!();
     
-    println!("{} Total strikes: {}", "✓".green(), chain.filtered.data.len());
-    println!("{} Total CE OI: {:.0}", "✓".green(), chain.filtered.ce_totals.total_oi);
-    println!("{} Total PE OI: {:.0}", "✓".green(), chain.filtered.pe_totals.total_oi);
+    println!("{} Total strikes processed: {}", "✓".green(), chain.filtered.data.len());
     println!();
 
     // Process the data
@@ -193,30 +195,24 @@ async fn run_single(symbol: &str, expiry: &str) -> Result<()> {
     );
 
     // Save to JSON
-    let output = serde_json::json!({
-        "timestamp": chain.records.timestamp,
-        "underlying_value": chain.records.underlying_value,
-        "expiry": expiry,
-        "totals": {
+    let data_single = serde_json::json!({
+        "record": {
+            "timestamp": chain.records.timestamp,
+            "underlying_value": chain.records.underlying_value,
+            "expiry": expiry,
+            "symbol": symbol,
             "ce_oi": chain.filtered.ce_totals.total_oi,
             "pe_oi": chain.filtered.pe_totals.total_oi,
         },
-        "data": [{
-            "symbol": symbol,
-            "type": match security.security_type {
-                models::SecurityType::Equity => "Equity",
-                models::SecurityType::Indices => "Indices",
-            },
-            "data": processed_data,
-        }],
+        "data": processed_data,
     });
 
     std::fs::write(
         "single_output.json",
-        serde_json::to_string_pretty(&output)?,
+        serde_json::to_string_pretty(&data_single)?,
     )?;
     
-    println!("{} Saved to single_output.json", "✓".green());
+    println!("{} Data saved to single_output.json", "✓".green());
     
     // Run rules on processed data
     let rules_output = rules::run_rules(
@@ -226,13 +222,17 @@ async fn run_single(symbol: &str, expiry: &str) -> Result<()> {
         chain.records.underlying_value,
     );
     
-    std::fs::write(
-        "single_rules.json",
-        serde_json::to_string_pretty(&rules_output)?,
-    )?;
-    
-    println!("{} Saved rules to single_rules.json", "✓".green());
-    // println!("{} Total alerts: {}", "ℹ".blue(), rules_output.summary.total_alerts);
+    if let Some(output) = rules_output {
+        std::fs::write(
+            "single_rules.json",
+            serde_json::to_string_pretty(&output)?,
+        )?;
+        
+        println!("{} Saved rules to single_rules.json", "✓".green());
+        println!("{} Total alerts: {}", "ℹ".blue(), output.alerts.len());
+    } else {
+        println!("{} No alerts found", "ℹ".blue());
+    }
     println!("{}", "=".repeat(60).blue());
 
     Ok(())
