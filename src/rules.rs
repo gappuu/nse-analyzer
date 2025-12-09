@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 /// Alert types for option strikes
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Alert {
+    pub symbol: String,
     pub strike_price: f64,
     pub option_type: String,  // "CE" or "PE"
     pub alert_type: String,   // Type of alert
@@ -48,15 +49,14 @@ pub fn run_rules(
     
     for opt in data {
         let strike = opt.strike_price.unwrap_or(0.0);
-        
         // Check CE (Call)
         if let Some(ce) = &opt.call {
-            alerts.extend(check_option_rules(strike, "CE", ce));
+            alerts.extend(check_option_rules(&symbol,strike, "CE", ce));
         }
         
         // Check PE (Put)
         if let Some(pe) = &opt.put {
-            alerts.extend(check_option_rules(strike, "PE", pe));
+            alerts.extend(check_option_rules(&symbol,strike, "PE", pe));
         }
     }
     
@@ -75,6 +75,7 @@ pub fn run_rules(
 
 /// Check rules for a single option (CE or PE)
 fn check_option_rules(
+    symbol: &str,
     strike: f64,
     option_type: &str,
     detail: &ProcessedOptionDetail,
@@ -87,12 +88,13 @@ fn check_option_rules(
     // Rule 1: Huge OI increase (> 1000%)
     if pchange_in_oi > 1000.0 {
         alerts.push(Alert {
+            symbol: symbol.to_string(),
             strike_price: strike,
             option_type: option_type.to_string(),
             alert_type: "HUGE_OI_INCREASE".to_string(),
             description: format!(
-                "{} {} strike has massive OI increase of {:.2}%",
-                option_type, strike, pchange_in_oi
+                "{} {} {} strike has massive OI increase of {:.2}%",
+                symbol, option_type, strike, pchange_in_oi
             ),
             values: AlertValues {
                 pchange_in_oi: Some(pchange_in_oi),
@@ -107,12 +109,13 @@ fn check_option_rules(
     // Rule 2: Huge OI decrease (< -50%)
     if pchange_in_oi < -50.0 {
         alerts.push(Alert {
+            symbol: symbol.to_string(),
             strike_price: strike,
             option_type: option_type.to_string(),
             alert_type: "HUGE_OI_DECREASE".to_string(),
             description: format!(
-                "{} {} strike has massive OI decrease of {:.2}%",
-                option_type, strike, pchange_in_oi
+                "{} {} {} strike has massive OI decrease of {:.2}%",
+                symbol, option_type, strike, pchange_in_oi
             ),
             values: AlertValues {
                 pchange_in_oi: Some(pchange_in_oi),
@@ -128,12 +131,13 @@ fn check_option_rules(
     if let Some(lp) = last_price {
         if lp > 0.0 && lp < 2.0 {
         alerts.push(Alert {
+            symbol: symbol.to_string(),
             strike_price: strike,
             option_type: option_type.to_string(),
             alert_type: "LOW_PRICE".to_string(),
             description: format!(
-                "{} {} strike has low price of ₹{:.2}",
-                    option_type, strike, lp
+                "{} {} {} strike has low price of ₹{:.2}",
+                symbol, option_type, strike, lp
             ),
             values: AlertValues {
                 pchange_in_oi: Some(pchange_in_oi),
@@ -186,7 +190,7 @@ mod tests {
             time_val: 4.0,
         };
         
-        let alerts = check_option_rules(100.0, "CE", &detail);
+        let alerts = check_option_rules("NIFTY",100.0, "CE", &detail);
         assert_eq!(alerts.len(), 1);
         assert_eq!(alerts[0].alert_type, "HUGE_OI_INCREASE");
     }
@@ -210,7 +214,7 @@ mod tests {
             time_val: 4.0,
         };
         
-        let alerts = check_option_rules(100.0, "CE", &detail);
+        let alerts = check_option_rules("NIFTY",100.0, "CE", &detail);
         assert_eq!(alerts.len(), 1);
         assert_eq!(alerts[0].alert_type, "HUGE_OI_DECREASE");
     }
@@ -234,7 +238,7 @@ mod tests {
             time_val: 1.5,
         };
         
-        let alerts = check_option_rules(100.0, "CE", &detail);
+        let alerts = check_option_rules("NIFTY",100.0, "CE", &detail);
         assert_eq!(alerts.len(), 1);
         assert_eq!(alerts[0].alert_type, "LOW_PRICE");
     }
@@ -258,7 +262,7 @@ mod tests {
             time_val: 1.0,
         };
         
-        let alerts = check_option_rules(100.0, "CE", &detail);
+        let alerts = check_option_rules("NIFTY",100.0, "CE", &detail);
         assert_eq!(alerts.len(), 2);  // Both HUGE_OI_INCREASE and LOW_PRICE
     }
 }
