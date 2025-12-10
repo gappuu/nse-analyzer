@@ -13,7 +13,7 @@ env:
 jobs:
   nse-batch-analysis:
     runs-on: ubuntu-latest
-    timeout-minutes: 5  # Kill entire job after 10 minutes
+    timeout-minutes: 6  # Kill entire job after 10 minutes
     
     steps:
     - name: Checkout repository
@@ -47,44 +47,86 @@ jobs:
         # Run the batch analysis
         ./target/release/nse-analyzer
         
-        # Create summary file for email
-        echo "NSE Analysis Summary - $(date)" > summary.txt
-        echo "=========================" >> summary.txt
-        echo "" >> summary.txt
-        
+        # Create summary data for email body (not as file)
         if [ -f "batch_rules.json" ]; then
-          echo "✅ Batch rules analysis completed" >> summary.txt
+          echo "ANALYSIS_SUCCESS=true" >> $GITHUB_ENV
           
-          # Count total alerts
+          # Count total alerts and securities
           ALERT_COUNT=$(jq '[.[].alerts | length] | add // 0' batch_rules.json)
           SECURITY_COUNT=$(jq 'length' batch_rules.json)
           
-          echo "📊 Securities with alerts: $SECURITY_COUNT" >> summary.txt
-          echo "🚨 Total alerts generated: $ALERT_COUNT" >> summary.txt
-          echo "" >> summary.txt
+          echo "ALERT_COUNT=$ALERT_COUNT" >> $GITHUB_ENV
+          echo "SECURITY_COUNT=$SECURITY_COUNT" >> $GITHUB_ENV
           
-          # Show top alert types
-          echo "📈 Top Alert Types:" >> summary.txt
-          jq -r '[.[].alerts[].alert_type] | group_by(.) | map({type: .[0], count: length}) | sort_by(.count) | reverse | .[:5][] | "  \(.type): \(.count)"' batch_rules.json >> summary.txt
+          # Get securities with alerts (names)
+          SECURITIES_WITH_ALERTS=$(jq -r '.[].symbol' batch_rules.json | tr '\n' ', ' | sed 's/,$//')
+          echo "SECURITIES_WITH_ALERTS=$SECURITIES_WITH_ALERTS" >> $GITHUB_ENV
+          
+          # Create alert type breakdown with security names
+          echo "Creating alert breakdown table..."
+          
+          # Get unique alert types
+          jq -r '[.[].alerts[].alert_type] | unique | .[]' batch_rules.json > /tmp/alert_types.txt
+          
+          # Create table data for each alert type
+          echo "ALERT_TABLE_DATA<<EOF" >> $GITHUB_ENV
+          while IFS= read -r alert_type; do
+            if [ ! -z "$alert_type" ]; then
+              securities=$(jq -r --arg type "$alert_type" '.[] | select(.alerts[]?.alert_type == $type) | .symbol' batch_rules.json | sort | uniq | tr '\n' ',' | sed 's/,$//')
+              count=$(jq -r --arg type "$alert_type" '[.[].alerts[] | select(.alert_type == $type)] | length' batch_rules.json)
+              echo "${alert_type}|${count}|${securities}"
+            fi
+          done < /tmp/alert_types.txt
+          echo "EOF" >> $GITHUB_ENV
           
         else
-          echo "❌ No alerts generated or analysis failed" >> summary.txt
-          echo "ℹ️  This could be due to:" >> summary.txt
-          echo "  - NSE API timeout (90 second limit)" >> summary.txt
-          echo "  - Network connectivity issues" >> summary.txt
-          echo "  - NSE server problems" >> summary.txt
+          echo "ANALYSIS_SUCCESS=false" >> $GITHUB_ENV
+          echo "ALERT_COUNT=0" >> $GITHUB_ENV
+          echo "SECURITY_COUNT=0" >> $GITHUB_ENV
+          echo "SECURITIES_WITH_ALERTS=None" >> $GITHUB_ENV
+          echo "ALERT_TABLE_DATA=" >> $GITHUB_ENV
         fi
         
-        echo "" >> summary.txt
-        echo "Generated at: $(date)" >> summary.txt
-        
     - name: Archive analysis results
+      if: env.ANALYSIS_SUCCESS == 'true'
       uses: actions/upload-artifact@v4
       with:
         name: nse-batch-rules-${{ github.run_number }}
         path: batch_rules.json
         retention-days: 30
         
+    - name: Format Alert Table
+      id: format-table
+      if: env.ANALYSIS_SUCCESS == 'true'
+      run: |
+        # Format the alert table data into readable format
+        formatted_table=""
+        if [ ! -z "${{ env.ALERT_TABLE_DATA }}" ]; then
+          while IFS='|' read -r alert_type count securities; do
+            if [ ! -z "$alert_type" ]; then
+              # Truncate long security lists for readability
+              if [ ${#securities} -gt 30 ]; then
+                securities_display="${securities:0:27}..."
+              else
+                securities_display="$securities"
+              fi
+              
+              # Format the table row
+              printf "%-25s | %-5s | %-30s\n" "$alert_type" "$count" "$securities_display" >> /tmp/formatted_table.txt
+            fi
+          done <<< "${{ env.ALERT_TABLE_DATA }}"
+          
+          # Read the formatted table
+          formatted_table=$(cat /tmp/formatted_table.txt)
+        else
+          formatted_table="No alerts generated"
+        fi
+        
+        # Set output for use in email
+        echo "formatted_table<<EOF" >> $GITHUB_OUTPUT
+        echo "$formatted_table" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
     - name: Send email notification
       if: always()  # Send email even if analysis fails
       uses: dawidd6/action-send-mail@v3
@@ -93,23 +135,37 @@ jobs:
         server_port: 587
         username: ${{ secrets.GMAIL_USERNAME }}
         password: ${{ secrets.GMAIL_PASSWORD }}
-        subject: "NSE Analysis Report - ${{ github.run_number }}"
+        subject: "NSE Analysis Report - ${{ github.run_number }} (${{ env.ANALYSIS_SUCCESS == 'true' && 'SUCCESS' || 'FAILED' }})"
         to: ${{ secrets.EMAIL_RECIPIENT }}
         from: ${{ secrets.GMAIL_USERNAME }}
         body: |
-          NSE Daily Analysis Completed
+          NSE Daily Analysis Report
+          =============================================
           
-          Run ID: ${{ github.run_number }}
-          Status: ${{ job.status }}
-          Timestamp: ${{ github.event.head_commit.timestamp }}
+          📊 SUMMARY
+          • Securities with alerts: ${{ env.SECURITY_COUNT || '0' }}
+          • Total alerts generated: ${{ env.ALERT_COUNT || '0' }}
+          • Status: ${{ env.ANALYSIS_SUCCESS == 'true' && '✅ Completed Successfully' || '❌ Failed/Timeout' }}
           
-          Please find the analysis results in the attached files.
+          🏢 SECURITIES WITH ALERTS
+          ${{ env.SECURITIES_WITH_ALERTS || 'None' }}
           
-          You can also download the full artifacts from:
-          ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        attachments: |
-          summary.txt
-          batch_rules.json
+          📈 ALERT BREAKDOWN TABLE
+          ========================
+          ${{ env.ANALYSIS_SUCCESS == 'true' && steps.format-table.outputs.formatted_table || 'No data available - analysis failed or timed out.' }}
+          
+          ℹ️  TROUBLESHOOTING (if failed)
+          • NSE API timeout (90 second limit)
+          • Network connectivity issues  
+          • NSE server problems
+          • Market hours/trading session status
+          
+          🔗 ADDITIONAL INFO
+          • Run ID: ${{ github.run_number }}
+          • Repository: ${{ github.repository }}
+          • Full artifacts: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          • Generated at: $(date '+%Y-%m-%d %H:%M:%S UTC')
+        attachments: batch_rules.json
         
     - name: Notification on failure
       if: failure()
