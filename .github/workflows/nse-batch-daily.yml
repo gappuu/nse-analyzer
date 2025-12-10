@@ -99,7 +99,7 @@ jobs:
             | map({
                 alert_type: .[0].type,
                 securities: [.[].symbol] | unique | join(","),
-                count: ([.[].symbol] | unique | length)
+                count: length
               })
             | sort_by(.count) | reverse
             | .[]
@@ -149,7 +149,7 @@ jobs:
           html_table='<table border="1" cellpadding="4" cellspacing="0" style="border-collapse:collapse;font-family:monospace;font-size:12px;">
             <tr>
               <th align="left">Alert Type</th>
-              <th align="right">Count</th>
+              <th align="right">Alert Count</th>
               <th align="left">Securities</th>
             </tr>'
 
