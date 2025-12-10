@@ -74,3 +74,27 @@ pub const DEFAULT_MAX_CONCURRENT: usize = 5;
 pub const HEADER_REFERER: &str = "https://www.nseindia.com/";
 pub const HEADER_X_REQUESTED_WITH: &str = "XMLHttpRequest";
 pub const HEADER_ACCEPT_HTML: &str = "text/html";
+
+// -----------------------------------------------
+// RUNTIME CONFIGURATION
+// -----------------------------------------------
+
+/// Get the execution mode from environment or default to batch
+pub fn get_execution_mode() -> String {
+    std::env::var("NSE_MODE").unwrap_or_else(|_| "batch".to_string())
+}
+
+/// Get symbol for single mode execution
+pub fn get_single_symbol() -> String {
+    std::env::var("NSE_SYMBOL").unwrap_or_else(|_| "NIFTY".to_string())
+}
+
+/// Get expiry for single mode execution  
+pub fn get_single_expiry() -> String {
+    std::env::var("NSE_EXPIRY").unwrap_or_else(|_| "23-Dec-2025".to_string())
+}
+
+/// Check if running in CI/automated environment
+pub fn is_ci_environment() -> bool {
+    std::env::var("CI").is_ok() || std::env::var("GITHUB_ACTIONS").is_ok()
+}

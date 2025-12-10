@@ -1,0 +1,128 @@
+name: NSE Daily Batch Analysis
+
+on:
+  schedule:
+    # Run at 2:45 PM IST (10:30 AM UTC) on weekdays only
+    - cron: '15 9 * * 1-5'
+  workflow_dispatch: # Allow manual trigger for testing
+
+env:
+  RUST_LOG: info
+  CARGO_TERM_COLOR: always
+
+jobs:
+  nse-batch-analysis:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: stable
+        
+    - name: Cache Cargo registry
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target/
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+          
+    - name: Build NSE Analyzer
+      run: cargo build --release
+      
+    - name: Run NSE Batch Analysis
+      run: |
+        # Set environment for batch mode only
+        export NSE_MODE=batch
+        
+        # Run the batch analysis
+        ./target/release/nse-analyzer
+        
+        # Create summary file for email
+        echo "NSE Analysis Summary - $(date)" > summary.txt
+        echo "=========================" >> summary.txt
+        echo "" >> summary.txt
+        
+        if [ -f "batch_rules.json" ]; then
+          echo "✅ Batch rules analysis completed" >> summary.txt
+          
+          # Count total alerts
+          ALERT_COUNT=$(jq '[.[].alerts | length] | add // 0' batch_rules.json)
+          SECURITY_COUNT=$(jq 'length' batch_rules.json)
+          
+          echo "📊 Securities with alerts: $SECURITY_COUNT" >> summary.txt
+          echo "🚨 Total alerts generated: $ALERT_COUNT" >> summary.txt
+          echo "" >> summary.txt
+          
+          # Show top alert types
+          echo "📈 Top Alert Types:" >> summary.txt
+          jq -r '[.[].alerts[].alert_type] | group_by(.) | map({type: .[0], count: length}) | sort_by(.count) | reverse | .[:5][] | "  \(.type): \(.count)"' batch_rules.json >> summary.txt
+          
+        else
+          echo "❌ No alerts generated or analysis failed" >> summary.txt
+        fi
+        
+        echo "" >> summary.txt
+        echo "Generated at: $(date)" >> summary.txt
+        
+    - name: Archive analysis results
+      uses: actions/upload-artifact@v3
+      with:
+        name: nse-batch-rules-${{ github.run_number }}
+        path: batch_rules.json
+        retention-days: 30
+        
+    - name: Send email notification
+      if: always()  # Send email even if analysis fails
+      uses: dawidd6/action-send-mail@v3
+      with:
+        server_address: ${{ secrets.EMAIL_SERVER }}
+        server_port: ${{ secrets.EMAIL_PORT }}
+        username: ${{ secrets.EMAIL_USERNAME }}
+        password: ${{ secrets.EMAIL_PASSWORD }}
+        subject: "NSE Analysis Report - ${{ github.run_number }}"
+        to: ${{ secrets.EMAIL_TO }}
+        from: ${{ secrets.EMAIL_FROM }}
+        body: |
+          NSE Daily Analysis Completed
+          
+          Run ID: ${{ github.run_number }}
+          Status: ${{ job.status }}
+          Timestamp: ${{ github.event.head_commit.timestamp }}
+          
+          Please find the analysis results in the attached files.
+          
+          You can also download the full artifacts from:
+          ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        attachments: |
+          summary.txt
+          batch_rules.json
+        
+    - name: Notification on failure
+      if: failure()
+      uses: dawidd6/action-send-mail@v3
+      with:
+        server_address: ${{ secrets.EMAIL_SERVER }}
+        server_port: ${{ secrets.EMAIL_PORT }}
+        username: ${{ secrets.EMAIL_USERNAME }}
+        password: ${{ secrets.EMAIL_PASSWORD }}
+        subject: "🚨 NSE Analysis FAILED - ${{ github.run_number }}"
+        to: ${{ secrets.EMAIL_TO }}
+        from: ${{ secrets.EMAIL_FROM }}
+        body: |
+          ⚠️ NSE Daily Analysis Failed
+          
+          Run ID: ${{ github.run_number }}
+          Repository: ${{ github.repository }}
+          
+          Please check the logs at:
+          ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          
+          Error details may be available in the workflow logs.

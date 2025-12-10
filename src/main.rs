@@ -122,14 +122,6 @@ async fn run_batch() -> Result<()> {
         ));
     }
     
-    // Save processed data
-    let output = serde_json::json!(processed_batch);
-    std::fs::write(
-        "output.json",
-        serde_json::to_string_pretty(&output)?,
-    )?;
-    println!("{} Saved {} securities to output.json", "✓".green(), successful.len());
-    
     // Run rules on all securities
     let rules_outputs = rules::run_batch_rules(batch_for_rules);
     
@@ -147,10 +139,11 @@ async fn run_batch() -> Result<()> {
         println!("{} Securities with alerts: {}", "ℹ".blue(), rules_outputs.len());
         println!("{} Total alerts: {}", "ℹ".blue(), total_alerts);
     } else {
+        // Create empty file for consistency
+        std::fs::write("batch_rules.json", "[]")?;
         println!("{} No alerts found across all securities", "ℹ".blue());
+        println!("{} Created empty rules file: batch_rules.json", "✓".green());
     }
-    
-    println!("{} Saved rules to batch_rules.json", "✓".green());
     
     println!();
     println!("{}", "=".repeat(60).blue());
@@ -160,7 +153,7 @@ async fn run_batch() -> Result<()> {
     Ok(())
 }
 
-/// Run single security fetch
+/// Run single security fetch (for API endpoints only - not used in GitHub Actions)
 async fn run_single(symbol: &str, expiry: &str) -> Result<()> {
     println!("{}", "=".repeat(60).blue());
     println!("{}", "NSE Single Security Fetch".green().bold());
@@ -206,45 +199,19 @@ async fn run_single(symbol: &str, expiry: &str) -> Result<()> {
         .map(|opt| opt.days_to_expiry)
         .unwrap_or(0);
 
-    // Save to JSON
-    let data_single = serde_json::json!({
-        "record": {
-            "timestamp": chain.records.timestamp,
-            "underlying_value": chain.records.underlying_value,
-            "spread": spread,
-            "days_to_expiry": days_to_expiry,
-            "expiry": expiry,
-            "symbol": symbol,
-            "ce_oi": chain.filtered.ce_totals.total_oi,
-            "pe_oi": chain.filtered.pe_totals.total_oi,
-        },
-        "data": processed_data,
-    });
-
-    std::fs::write(
-        "single_output.json",
-        serde_json::to_string_pretty(&data_single)?,
-    )?;
-    
-    println!("{} Data saved to single_output.json", "✓".green());
+    // Print results (no file saving - this will be returned as JSON in API)
     println!("{} Days to expiry: {}", "ℹ".blue(), days_to_expiry);
     
-    // Run rules on processed data - now pass spread parameter
+    // Run rules on processed data
     let rules_output = rules::run_rules(
         &processed_data,
         symbol.to_string(),
         chain.records.timestamp.clone(),
         chain.records.underlying_value,
-        spread,  // Pass the spread value
+        spread,
     );
     
     if let Some(output) = rules_output {
-        std::fs::write(
-            "single_rules.json",
-            serde_json::to_string_pretty(&output)?,
-        )?;
-        
-        println!("{} Saved rules to single_rules.json", "✓".green());
         println!("{} Total alerts: {}", "ℹ".blue(), output.alerts.len());
     } else {
         println!("{} No alerts found", "ℹ".blue());
@@ -257,23 +224,49 @@ async fn run_single(symbol: &str, expiry: &str) -> Result<()> {
 #[tokio::main]
 async fn main() -> Result<()> {
     // ========================================
-    // CONFIGURATION - EDIT THIS SECTION
+    // CONFIGURATION - Now from environment
     // ========================================
     
-    let mode = "batch"; // Change to "batch" or "single"
+    let mode = config::get_execution_mode();
     
     // For single mode:
-    let symbol = "NIFTY";
-    let expiry = "23-Dec-2025";
+    let symbol = config::get_single_symbol();
+    let expiry = config::get_single_expiry();
+    
+    // Log configuration for CI environments
+    if config::is_ci_environment() {
+        println!("{}", "Running in CI environment (GitHub Actions)".blue());
+        println!("{} Mode: {}", "→".cyan(), mode.yellow());
+        if mode == "single" {
+            println!("{} Single mode not supported in CI - switching to batch", "⚠".yellow());
+        }
+        println!();
+    }
     
     // ========================================
     
-    match mode {
+    match mode.as_str() {
         "batch" => run_batch().await?,
-        "single" => run_single(symbol, expiry).await?,
+        "single" => {
+            if config::is_ci_environment() {
+                // Force batch mode in CI
+                println!("{} GitHub Actions only supports batch mode, running batch instead", "ℹ".blue());
+                run_batch().await?;
+            } else {
+                run_single(&symbol, &expiry).await?;
+            }
+        }
         _ => {
-            eprintln!("Invalid mode. Use 'batch' or 'single'");
-            std::process::exit(1);
+            if config::is_ci_environment() {
+                // Force batch mode in CI
+                println!("{} GitHub Actions only supports batch mode, switching to batch", "ℹ".blue());
+                run_batch().await?;
+            } else {
+                eprintln!("Invalid mode '{}'. Use 'batch' or 'single'", mode);
+                eprintln!("Set NSE_MODE environment variable to control execution mode");
+                eprintln!("Note: GitHub Actions only supports 'batch' mode");
+                std::process::exit(1);
+            }
         }
     }
 
