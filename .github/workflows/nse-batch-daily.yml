@@ -110,11 +110,9 @@ jobs:
       id: format-table
       if: always()  # Run even if analysis failed
       run: |
-        # Format the alert table data into readable format
         echo "Debug: ANALYSIS_SUCCESS = ${{ env.ANALYSIS_SUCCESS }}"
-        echo "Debug: Checking ALERT_TABLE_DATA..."
         
-        # Read the ALERT_TABLE_DATA environment variable correctly
+        # Read the ALERT_TABLE_DATA environment variable
         alert_data=$(cat << 'EOF'
         ${{ env.ALERT_TABLE_DATA }}
         EOF
@@ -122,58 +120,23 @@ jobs:
         
         echo "Debug: Alert data content:"
         echo "$alert_data"
-        echo "Debug: Alert data length: ${#alert_data}"
         
         if [ "${{ env.ANALYSIS_SUCCESS }}" = "true" ] && [ ! -z "$alert_data" ] && [ "$alert_data" != "" ]; then
-          echo "Processing alert table data..."
-          
-          # Process each line of alert table data
-          while IFS='|' read -r alert_type count securities; do
-            if [ ! -z "$alert_type" ] && [ "$alert_type" != "" ]; then
-              echo "Processing row: [$alert_type] [$count] [$securities]"
-              
-              # Truncate long security lists for readability
-              if [ ${#securities} -gt 35 ]; then
-                securities_display="${securities:0:32}..."
-              else
-                securities_display="$securities"
-              fi
-              
-              # Format the table row
-              printf "%-25s | %-5s | %-35s\n" "$alert_type" "$count" "$securities_display" >> /tmp/formatted_table.txt
-            fi
-          done <<< "$alert_data"
-          
-          # Check if we got any data
-          if [ -f /tmp/formatted_table.txt ] && [ -s /tmp/formatted_table.txt ]; then
-            echo "Table formatting successful!"
-            cat /tmp/formatted_table.txt
-          else
-            echo "No table data was generated"
-            echo "Alert Type                | Count | Securities" > /tmp/formatted_table.txt
-            echo "No detailed breakdown available (data parsing failed)" >> /tmp/formatted_table.txt
-          fi
+          echo "Using raw alert data as string..."
+          # Just pass through the raw data
+          formatted_output="$alert_data"
         else
-          echo "Creating fallback table..."
           if [ "${{ env.ANALYSIS_SUCCESS }}" = "true" ]; then
-            echo "Alert Type                | Count | Securities" > /tmp/formatted_table.txt
-            echo "No alerts found - all securities clean!" >> /tmp/formatted_table.txt
+            formatted_output="No alerts found - all securities clean!"
           else
-            echo "Alert Type                | Count | Securities" > /tmp/formatted_table.txt
-            echo "Analysis failed or timed out - no data available" >> /tmp/formatted_table.txt
+            formatted_output="Analysis failed or timed out - no data available"
           fi
         fi
         
-        # Set output for use in email (handle multiline properly)
+        # Set output for use in email
         {
           echo "formatted_table<<EOF"
-          if [ -f /tmp/formatted_table.txt ]; then
-            cat /tmp/formatted_table.txt
-          else
-            echo "Alert Type                | Count | Securities"
-            echo "--------------------------|-------|----------------------------"
-            echo "Error: Could not generate table"
-          fi
+          echo "$formatted_output"
           echo "EOF"
         } >> $GITHUB_OUTPUT
     - name: Generate IST Timestamp
@@ -204,10 +167,8 @@ jobs:
           🏢 SECURITIES WITH ALERTS
           ${{ env.SECURITIES_WITH_ALERTS || 'None' }}
           
-          📈 ALERT BREAKDOWN TABLE
-          ========================
-          Alert Type                | Count | Securities
-          --------------------------|-------|----------------------------
+          📈 ALERT BREAKDOWN (AlertType|Count|Securities)
+          ===============================================
           ${{ steps.format-table.outputs.formatted_table }}
           
           ${{ env.ANALYSIS_SUCCESS != 'true' && 'ℹ️  TROUBLESHOOTING
