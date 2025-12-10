@@ -73,7 +73,7 @@ jobs:
         echo "Generated at: $(date)" >> summary.txt
         
     - name: Archive analysis results
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: nse-batch-rules-${{ github.run_number }}
         path: batch_rules.json
