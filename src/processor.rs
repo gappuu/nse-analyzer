@@ -480,4 +480,25 @@ mod tests {
         // PE: strike (100) < underlying (110), so time_val = 12
         assert_eq!(calculate_time_value(&detail, 100.0, 110.0, false), 12.0);
     }
+
+    #[test]
+    fn test_negative_time_value_calculation() {
+        let detail = OptionDetail {
+            // identifier: Some(String::new()),
+            strike_price: Some(100.0),
+            underlying_value: Some(110.0),
+            open_interest: Some(1000.0),
+            change_in_oi: Some(50.0),
+            per_chg_oi: Some(5.0),
+            last_price: Some(6.0),
+            price_change: Some(1.0),
+            per_chg_price: Some(5.0),
+        };
+        
+        // CE: underlying (110) > strike (100), so time_val = 6 - (110-100) = -4
+        assert_eq!(calculate_time_value(&detail, 100.0, 110.0, true), -4.0);
+        
+        // PE: strike (100) < underlying (110), so time_val = 6
+        assert_eq!(calculate_time_value(&detail, 100.0, 110.0, false), 6.0);
+    }
 }
