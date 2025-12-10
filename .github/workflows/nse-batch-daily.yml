@@ -137,7 +137,7 @@ jobs:
         echo "IST_TIMESTAMP=$IST_TIME" >> $GITHUB_ENV
         
     - name: Send email notification
-      if: always()  # Send email even if analysis fails
+      if: always()
       uses: dawidd6/action-send-mail@v3
       with:
         server_address: smtp.gmail.com
@@ -161,7 +161,7 @@ jobs:
           
           📈 ALERT BREAKDOWN (AlertType|Count|Securities)
           ===============================================
-          ${{ steps.format-table.outputs.formatted_table }}
+          ${{ env.ANALYSIS_SUCCESS == 'true' && env.ALERT_TABLE_DATA || 'No alerts found - all securities clean!' }}
           
           ${{ env.ANALYSIS_SUCCESS != 'true' && 'ℹ️  TROUBLESHOOTING
           • NSE API timeout (90 second limit)
@@ -175,7 +175,7 @@ jobs:
           • Full artifacts: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           • Generated at: ${{ env.IST_TIMESTAMP }}
         attachments: batch_rules.json
-        
+
     - name: Notification on failure
       if: failure()
       uses: dawidd6/action-send-mail@v3
