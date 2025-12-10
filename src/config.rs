@@ -66,8 +66,7 @@ pub const GITHUB_ACTIONS_TIMEOUT_SECS: u64 = 200;  // 200 second timeout for CI
 // CONCURRENCY LIMITS
 // -----------------------------------------------
 pub const DEFAULT_MAX_CONCURRENT: usize = 5;
-pub const CI_MAX_CONCURRENT: usize = 8;  // Higher concurrency for faster CI execution
-
+pub const CI_MAX_CONCURRENT: usize = 5; 
 // -----------------------------------------------
 // RATE LIMITING (if needed)
 // -----------------------------------------------

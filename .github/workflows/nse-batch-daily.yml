@@ -39,7 +39,7 @@ jobs:
       run: cargo build --release
       
     - name: Run NSE Batch Analysis
-      timeout-minutes: 3  # Kill this step after 2 minutes (120 seconds)
+      timeout-minutes: 3  # Kill this step after 3 minutes (180 seconds)
       run: |
         # Set environment for batch mode only
         export NSE_MODE=batch
