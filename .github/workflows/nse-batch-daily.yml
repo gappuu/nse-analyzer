@@ -115,7 +115,7 @@ jobs:
       with:
         name: nse-batch-rules-${{ github.run_number }}
         path: batch_rules.json
-        retention-days: 30
+        retention-days: 10
         
     - name: Format Alert Table
       id: format-table
@@ -126,54 +126,51 @@ jobs:
         printf '%s\n' "$ALERT_TABLE_DATA"
 
         if [ "$ANALYSIS_SUCCESS" = "true" ] && [ -n "$ALERT_TABLE_DATA" ]; then
-          echo "Formatting alert table with wrapping..."
+          echo "Formatting alert table as HTML..."
 
-          # Max width of the terminal / email safe
-          wrap_width=60  # adjust if needed
+          html_table='<table border="1" cellpadding="4" cellspacing="0" style="border-collapse:collapse;font-family:monospace;font-size:12px;">
+            <tr>
+              <th align="left">Alert Type</th>
+              <th align="right">Count</th>
+              <th align="left">Securities</th>
+            </tr>'
 
-          # Find max alert type length
-          maxlen=$(printf '%s\n' "$ALERT_TABLE_DATA" | awk -F'|' '{print $1}' | awk '{ if (length > max) max = length } END { print max }')
+          # ALERT_TABLE_DATA lines are like: ALERT_TYPE|count|SEC1,SEC2,...
+            while IFS='|' read -r alert_type count securities; do
+              [ -z "$alert_type" ] && continue
 
-          formatted_output=$(printf '%s\n' "$ALERT_TABLE_DATA" | awk -F'|' -v maxlen="$maxlen" -v wrap="$wrap_width" '
-          function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
-          {
-            alert=$1; count=$2; tickers=trim($3);
+              # Basic HTML escaping for &, <, >
+              esc_type=$(printf '%s' "$alert_type" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+              esc_secs=$(printf '%s' "$securities" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
 
-            padding = maxlen - length(alert);
-            dots = "";
-            for(i=0;i<padding;i++) dots=dots".";
-            prefix = sprintf("%s%s| %s | ", alert, dots, count);
+          html_table="${html_table}
+            <tr>
+              <td>${esc_type}</td>
+              <td align=\"right\">${count}</td>
+              <td>${esc_secs}</td>
+            </tr>"
+                        done <<EOF
+            $ALERT_TABLE_DATA
+            EOF
 
-            # Split tickers into wrapped lines
-            line=prefix;
-            n=split(tickers, parts, /,/);
-            for(i=1;i<=n;i++){
-              t=parts[i];
-              if (length(line t ",") > wrap) {
-                # print and start a new wrapped line
-                print line;
-                line=sprintf("%" length(prefix) "s", "") t ","
-              } else {
-                line = line t ",";
-              }
-            }
-            sub(/,$/, "", line);
-            print line;
-          }')
+                html_table="${html_table}
+          </table>"
 
-        else
-          if [ "$ANALYSIS_SUCCESS" = "true" ]; then
-            formatted_output="No alerts found - all securities clean!"
+          formatted_output="$html_table"
           else
-            formatted_output="Analysis failed or timed out - no data available"
+            if [ "$ANALYSIS_SUCCESS" = "true" ]; then
+              formatted_output="<p>No alerts found - all securities clean!</p>"
+            else
+              formatted_output="<p>Analysis failed or timed out - no data available.</p>"
+            fi
           fi
-        fi
 
-        {
-          echo "formatted_table<<EOF"
-          echo "$formatted_output"
-          echo "EOF"
-        } >> "$GITHUB_OUTPUT"
+          {
+            echo "formatted_table<<EOF"
+            echo "$formatted_output"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
 
     - name: Generate IST Timestamp
       run: |
@@ -191,37 +188,49 @@ jobs:
         subject: "NSE Analysis Report - ${{ env.IST_TIMESTAMP }} (${{ env.ANALYSIS_SUCCESS == 'true' && 'SUCCESS' || 'FAILED' }})"
         to: ${{ secrets.EMAIL_RECIPIENT }},${{ secrets.EMAIL_RECIPIENT_2 }}
         from: ${{ secrets.GMAIL_USERNAME }}
-        body: |
-          NSE Daily Analysis Report
-          =============================================
-          
-          🧮 PROCESSING STATS
-          • ✓ Successful: ${{ env.SUCCESS_COUNT || '0' }}
-          • ✗ Failed: ${{ env.FAILED_COUNT || '0' }}
-          
-          📊 SUMMARY
-          • Securities with alerts: ${{ env.SECURITY_COUNT || '0' }}
-          • Total alerts generated: ${{ env.ALERT_COUNT || '0' }}
-          • Status: ${{ env.ANALYSIS_SUCCESS == 'true' && '✅ Completed Successfully' || '❌ Failed/Timeout' }}
-          
-          🏢 SECURITIES WITH ALERTS
-          ${{ env.SECURITIES_WITH_ALERTS || 'None' }}
-          
-          📈 ALERT BREAKDOWN (AlertType | Security Count | Securities)
-          ===============================================
-          ${{ steps.format-table.outputs.formatted_table }}
-          
-          ${{ env.ANALYSIS_SUCCESS != 'true' && 'ℹ️  TROUBLESHOOTING
-          • NSE API timeout (90 second limit)
-          • Network connectivity issues  
-          • NSE server problems
-          • Market hours/trading session status' || '' }}
-          
-          🔗 ADDITIONAL INFO
-          • Run ID: ${{ github.run_number }}
-          • Repository: ${{ github.repository }}
-          • Full artifacts: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          • Generated at: ${{ env.IST_TIMESTAMP }}
+        html_body: |
+            <html>
+              <body style="font-family: Arial, sans-serif; font-size: 14px;">
+                <h2>NSE Daily Analysis Report</h2>
+                <hr />
+                <h3>📊 Summary</h3>
+                <ul>
+                  <li><b>Securities with alerts:</b> ${{ env.SECURITY_COUNT || '0' }}</li>
+                  <li><b>Total alerts generated:</b> ${{ env.ALERT_COUNT || '0' }}</li>
+                  <li><b>Status:</b> ${{ env.ANALYSIS_SUCCESS == 'true' && '✅ Completed Successfully' || '❌ Failed/Timeout' }}</li>
+                </ul>
+
+                <h3>🧮 Processing Stats</h3>
+                <ul>
+                  <li><b>✓ Successful:</b> ${{ env.SUCCESS_COUNT || '0' }}</li>
+                  <li><b>✗ Failed:</b> ${{ env.FAILED_COUNT || '0' }}</li>
+                </ul>
+
+                <h3>🏢 Securities with Alerts</h3>
+                <p>${{ env.SECURITIES_WITH_ALERTS || 'None' }}</p>
+
+                <h3>📈 Alert Breakdown</h3>
+                ${{ steps.format-table.outputs.formatted_table }}
+
+                ${{ env.ANALYSIS_SUCCESS != 'true' && '
+                <h3>ℹ️ Troubleshooting (if failed)</h3>
+                <ul>
+                  <li>NSE API timeout (90 second limit)</li>
+                  <li>Network connectivity issues</li>
+                  <li>NSE server problems</li>
+                  <li>Market hours / trading session status</li>
+                </ul>
+                ' || '' }}
+
+                <h3>🔗 Additional Info</h3>
+                <ul>
+                  <li><b>Run ID:</b> ${{ github.run_number }}</li>
+                  <li><b>Repository:</b> ${{ github.repository }}</li>
+                  <li><b>Full artifacts:</b> <a href="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}">Open in GitHub</a></li>
+                  <li><b>Generated at:</b> ${{ env.IST_TIMESTAMP }}</li>
+                </ul>
+              </body>
+            </html>
         attachments: batch_rules.json
 
     - name: Notification on failure
