@@ -119,15 +119,48 @@ jobs:
         
     - name: Format Alert Table
       id: format-table
-      if: always()  # Run even if analysis failed
+      if: always()
       run: |
         echo "Debug: ANALYSIS_SUCCESS = $ANALYSIS_SUCCESS"
         echo "Debug: ALERT_TABLE_DATA (raw):"
         printf '%s\n' "$ALERT_TABLE_DATA"
 
         if [ "$ANALYSIS_SUCCESS" = "true" ] && [ -n "$ALERT_TABLE_DATA" ]; then
-          echo "Using ALERT_TABLE_DATA from env..."
-          formatted_output="$ALERT_TABLE_DATA"
+          echo "Formatting alert table with wrapping..."
+
+          # Max width of the terminal / email safe
+          wrap_width=60  # adjust if needed
+
+          # Find max alert type length
+          maxlen=$(printf '%s\n' "$ALERT_TABLE_DATA" | awk -F'|' '{print $1}' | awk '{ if (length > max) max = length } END { print max }')
+
+          formatted_output=$(printf '%s\n' "$ALERT_TABLE_DATA" | awk -F'|' -v maxlen="$maxlen" -v wrap="$wrap_width" '
+          function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+          {
+            alert=$1; count=$2; tickers=trim($3);
+
+            padding = maxlen - length(alert);
+            dots = "";
+            for(i=0;i<padding;i++) dots=dots".";
+            prefix = sprintf("%s%s| %s | ", alert, dots, count);
+
+            # Split tickers into wrapped lines
+            line=prefix;
+            n=split(tickers, parts, /,/);
+            for(i=1;i<=n;i++){
+              t=parts[i];
+              if (length(line t ",") > wrap) {
+                # print and start a new wrapped line
+                print line;
+                line=sprintf("%" length(prefix) "s", "") t ","
+              } else {
+                line = line t ",";
+              }
+            }
+            sub(/,$/, "", line);
+            print line;
+          }')
+
         else
           if [ "$ANALYSIS_SUCCESS" = "true" ]; then
             formatted_output="No alerts found - all securities clean!"
@@ -174,9 +207,9 @@ jobs:
           🏢 SECURITIES WITH ALERTS
           ${{ env.SECURITIES_WITH_ALERTS || 'None' }}
           
-          📈 ALERT BREAKDOWN (AlertType|Count|Securities)
+          📈 ALERT BREAKDOWN (AlertType | Security Count | Securities)
           ===============================================
-          ${{ env.ALERT_TABLE_DATA }}
+          ${{ steps.format-table.outputs.formatted_table }}
           
           ${{ env.ANALYSIS_SUCCESS != 'true' && 'ℹ️  TROUBLESHOOTING
           • NSE API timeout (90 second limit)
