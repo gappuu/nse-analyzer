@@ -44,8 +44,15 @@ jobs:
         # Set environment for batch mode only
         export NSE_MODE=batch
         
-        # Run the batch analysis
-        ./target/release/nse-analyzer
+        # Run the batch analysis and capture output
+        ./target/release/nse-analyzer | tee nse_output.log
+
+        # Parse success/failure counts from Rust summary
+        SUCCESS_COUNT=$(grep -oP '✓ Successful:\s*\K[0-9]+' nse_output.log || echo 0)
+        FAILED_COUNT=$(grep -oP '✗ Failed:\s*\K[0-9]+' nse_output.log || echo 0)
+
+        echo "SUCCESS_COUNT=$SUCCESS_COUNT" >> $GITHUB_ENV
+        echo "FAILED_COUNT=$FAILED_COUNT" >> $GITHUB_ENV
         
         # Create summary data for email body (not as file)
         if [ -f "batch_rules.json" ]; then
@@ -154,6 +161,10 @@ jobs:
         body: |
           NSE Daily Analysis Report
           =============================================
+          
+          🧮 PROCESSING STATS
+          • ✓ Successful: ${{ env.SUCCESS_COUNT || '0' }}
+          • ✗ Failed: ${{ env.FAILED_COUNT || '0' }}
           
           📊 SUMMARY
           • Securities with alerts: ${{ env.SECURITY_COUNT || '0' }}
