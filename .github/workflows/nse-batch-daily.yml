@@ -153,7 +153,7 @@ jobs:
         username: ${{ secrets.GMAIL_USERNAME }}
         password: ${{ secrets.GMAIL_PASSWORD }}
         subject: "NSE Analysis Report - ${{ env.IST_TIMESTAMP }} (${{ env.ANALYSIS_SUCCESS == 'true' && 'SUCCESS' || 'FAILED' }})"
-        to: ${{ secrets.EMAIL_RECIPIENT }}
+        to: ${{ secrets.EMAIL_RECIPIENT }},${{ secrets.EMAIL_RECIPIENT_2 }}
         from: ${{ secrets.GMAIL_USERNAME }}
         body: |
           NSE Daily Analysis Report
