@@ -110,35 +110,27 @@ jobs:
       id: format-table
       if: always()  # Run even if analysis failed
       run: |
-        echo "Debug: ANALYSIS_SUCCESS = ${{ env.ANALYSIS_SUCCESS }}"
-        
-        # Read the ALERT_TABLE_DATA environment variable
-        alert_data=$(cat << 'EOF'
-        ${{ env.ALERT_TABLE_DATA }}
-        EOF
-        )
-        
-        echo "Debug: Alert data content:"
-        echo "$alert_data"
-        
-        if [ "${{ env.ANALYSIS_SUCCESS }}" = "true" ] && [ ! -z "$alert_data" ] && [ "$alert_data" != "" ]; then
-          echo "Using raw alert data as string..."
-          # Just pass through the raw data
-          formatted_output="$alert_data"
+        echo "Debug: ANALYSIS_SUCCESS = $ANALYSIS_SUCCESS"
+        echo "Debug: ALERT_TABLE_DATA (raw):"
+        printf '%s\n' "$ALERT_TABLE_DATA"
+
+        if [ "$ANALYSIS_SUCCESS" = "true" ] && [ -n "$ALERT_TABLE_DATA" ]; then
+          echo "Using ALERT_TABLE_DATA from env..."
+          formatted_output="$ALERT_TABLE_DATA"
         else
-          if [ "${{ env.ANALYSIS_SUCCESS }}" = "true" ]; then
+          if [ "$ANALYSIS_SUCCESS" = "true" ]; then
             formatted_output="No alerts found - all securities clean!"
           else
             formatted_output="Analysis failed or timed out - no data available"
           fi
         fi
-        
-        # Set output for use in email
+
         {
           echo "formatted_table<<EOF"
           echo "$formatted_output"
           echo "EOF"
-        } >> $GITHUB_OUTPUT
+        } >> "$GITHUB_OUTPUT"
+
     - name: Generate IST Timestamp
       run: |
         IST_TIME=$(TZ="Asia/Kolkata" date +"%d %b %y %H:%M")
