@@ -75,17 +75,35 @@ jobs:
           jq -c '.[0:2]' batch_rules.json || echo "Failed to parse JSON"
 
           # Generate table once into a variable
+          # NOTE: HUGE_OI_INCREASE / HUGE_OI_DECREASE are split by option_type (CE/PE)
           TABLE_DATA=$(jq -r '
-            [.[].alerts[] | {type: .alert_type, symbol: .symbol}] | 
-            group_by(.type) | 
-            map({
-              alert_type: .[0].type, 
-              securities: [.[].symbol] | unique | join(","),
-              count: ([.[].symbol] | unique | length)
-            }) | 
-            sort_by(.count) | reverse | 
-            .[] | 
-            "\(.alert_type)|\(.count)|\(.securities)"
+            [.[].alerts[]
+             | {
+                 type: (
+                   if .alert_type == "HUGE_OI_INCREASE" and .option_type == "CE" then
+                     "Call_OI_INCREASE"
+                   elif .alert_type == "HUGE_OI_INCREASE" and .option_type == "PE" then
+                     "Put_OI_INCREASE"
+                   elif .alert_type == "HUGE_OI_DECREASE" and .option_type == "CE" then
+                     "Call_OI_DECREASE"
+                   elif .alert_type == "HUGE_OI_DECREASE" and .option_type == "PE" then
+                     "Put_OI_DECREASE"
+                   else
+                     .alert_type
+                   end
+                 ),
+                 symbol: .symbol
+               }
+            ]
+            | group_by(.type)
+            | map({
+                alert_type: .[0].type,
+                securities: [.[].symbol] | unique | join(","),
+                count: ([.[].symbol] | unique | length)
+              })
+            | sort_by(.count) | reverse
+            | .[]
+            | "\(.alert_type)|\(.count)|\(.securities)"
           ' batch_rules.json)
 
           echo "Debug: Generated table data:"
@@ -108,7 +126,7 @@ jobs:
           echo "SECURITIES_WITH_ALERTS=None" >> $GITHUB_ENV
           echo "ALERT_TABLE_DATA=" >> $GITHUB_ENV
         fi
-        
+
     - name: Archive analysis results
       if: env.ANALYSIS_SUCCESS == 'true'
       uses: actions/upload-artifact@v4
