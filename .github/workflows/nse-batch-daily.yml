@@ -13,7 +13,7 @@ env:
 jobs:
   nse-batch-analysis:
     runs-on: ubuntu-latest
-    timeout-minutes: 6  # Kill entire job after 10 minutes
+    timeout-minutes: 10  # Kill entire job after 10 minutes
     
     steps:
     - name: Checkout repository
@@ -39,7 +39,7 @@ jobs:
       run: cargo build --release
       
     - name: Run NSE Batch Analysis
-      timeout-minutes: 2  # Kill this step after 2 minutes (120 seconds)
+      timeout-minutes: 3  # Kill this step after 2 minutes (120 seconds)
       run: |
         # Set environment for batch mode only
         export NSE_MODE=batch
