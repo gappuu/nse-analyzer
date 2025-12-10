@@ -13,6 +13,7 @@ env:
 jobs:
   nse-batch-analysis:
     runs-on: ubuntu-latest
+    timeout-minutes: 5  # Kill entire job after 10 minutes
     
     steps:
     - name: Checkout repository
@@ -38,6 +39,7 @@ jobs:
       run: cargo build --release
       
     - name: Run NSE Batch Analysis
+      timeout-minutes: 2  # Kill this step after 2 minutes (120 seconds)
       run: |
         # Set environment for batch mode only
         export NSE_MODE=batch
@@ -67,6 +69,10 @@ jobs:
           
         else
           echo "❌ No alerts generated or analysis failed" >> summary.txt
+          echo "ℹ️  This could be due to:" >> summary.txt
+          echo "  - NSE API timeout (90 second limit)" >> summary.txt
+          echo "  - Network connectivity issues" >> summary.txt
+          echo "  - NSE server problems" >> summary.txt
         fi
         
         echo "" >> summary.txt

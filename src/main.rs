@@ -24,24 +24,51 @@ async fn run_batch() -> Result<()> {
     println!("{} Found {} securities", "✓".green(), securities.len());
     println!();
 
-    // Step 2: Bulk process all securities
+    // Step 2: Bulk process all securities with timeout handling
     println!("{}", "Step 2: Processing all securities...".cyan());
-    println!("{} Max concurrent requests: {}", "ℹ".blue(), config::DEFAULT_MAX_CONCURRENT);
+    
+    let max_concurrent = if config::is_ci_environment() {
+        println!("{} CI Mode: Using higher concurrency ({})", "ℹ".blue(), config::CI_MAX_CONCURRENT);
+        config::CI_MAX_CONCURRENT
+    } else {
+        println!("{} Max concurrent requests: {}", "ℹ".blue(), config::DEFAULT_MAX_CONCURRENT);
+        config::DEFAULT_MAX_CONCURRENT
+    };
+    
     println!();
 
     let start_time = std::time::Instant::now();
     
-    let results = client.fetch_all_option_chains(
-        securities.clone(),
-        config::DEFAULT_MAX_CONCURRENT,
-    )
-    .await;
+    // Wrap the batch processing with a timeout for CI environments
+    let results = if config::is_ci_environment() {
+        println!("{} CI timeout enabled: {} seconds", "⏱".yellow(), config::GITHUB_ACTIONS_TIMEOUT_SECS);
+        
+        let timeout_duration = std::time::Duration::from_secs(config::GITHUB_ACTIONS_TIMEOUT_SECS);
+        
+        match tokio::time::timeout(
+            timeout_duration,
+            client.fetch_all_option_chains(securities.clone(), max_concurrent)
+        ).await {
+            Ok(results) => results,
+            Err(_) => {
+                println!("{} Timeout reached after {} seconds - stopping analysis", "⚠".red(), config::GITHUB_ACTIONS_TIMEOUT_SECS);
+                println!("{} This may indicate NSE API issues or network problems", "ℹ".blue());
+                
+                // Create empty results vector matching the securities count
+                securities.iter().map(|_| Err(anyhow::anyhow!("Timeout"))).collect()
+            }
+        }
+    } else {
+        // No timeout for local development
+        client.fetch_all_option_chains(securities.clone(), max_concurrent).await
+    };
 
     let elapsed = start_time.elapsed();
     
     // Step 3: Process results
     let mut successful = Vec::new();
     let mut failed = Vec::new();
+    let mut timeout_count = 0;
 
     for (security, result) in securities.iter().zip(results.iter()) {
         match result {
@@ -50,8 +77,13 @@ async fn run_batch() -> Result<()> {
                 print!("{}", ".".green());
             }
             Err(e) => {
-                failed.push((security.symbol.clone(), e.to_string()));
-                print!("{}", "✗".red());
+                if e.to_string().contains("Timeout") {
+                    timeout_count += 1;
+                    print!("{}", "⏱".yellow());
+                } else {
+                    failed.push((security.symbol.clone(), e.to_string()));
+                    print!("{}", "✗".red());
+                }
             }
         }
     }
@@ -64,8 +96,13 @@ async fn run_batch() -> Result<()> {
     println!("{}", "=".repeat(60).blue());
     println!("{} Successful: {}", "✓".green(), successful.len());
     println!("{} Failed: {}", "✗".red(), failed.len());
+    if timeout_count > 0 {
+        println!("{} Timed out: {} (due to {} second limit)", "⏱".yellow(), timeout_count, config::GITHUB_ACTIONS_TIMEOUT_SECS);
+    }
     println!("{} Time taken: {:.2}s", "⏱".yellow(), elapsed.as_secs_f64());
-    println!("{} Avg time per security: {:.2}s", "⏱".yellow(), elapsed.as_secs_f64() / securities.len() as f64);
+    if securities.len() > 0 {
+        println!("{} Avg time per security: {:.2}s", "⏱".yellow(), elapsed.as_secs_f64() / securities.len() as f64);
+    }
     println!();
 
     // Show failed securities

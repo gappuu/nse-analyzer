@@ -58,9 +58,15 @@ pub const RETRY_MAX_DELAY_SECS: u64 = 5;
 pub const RETRY_MAX_ATTEMPTS: usize = 5;
 
 // -----------------------------------------------
+// GITHUB ACTIONS TIMEOUT CONFIG
+// -----------------------------------------------
+pub const GITHUB_ACTIONS_TIMEOUT_SECS: u64 = 90;  // 90 second timeout for CI
+
+// -----------------------------------------------
 // CONCURRENCY LIMITS
 // -----------------------------------------------
 pub const DEFAULT_MAX_CONCURRENT: usize = 5;
+pub const CI_MAX_CONCURRENT: usize = 8;  // Higher concurrency for faster CI execution
 
 // -----------------------------------------------
 // RATE LIMITING (if needed)
