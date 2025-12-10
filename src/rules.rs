@@ -10,6 +10,7 @@ pub struct Alert {
     pub option_type: String,  // "CE" or "PE"
     pub alert_type: String,   // Type of alert
     pub description: String,
+    pub spread: f64,          // Spread value
     pub values: AlertValues,
 }
 
@@ -45,6 +46,7 @@ pub fn run_rules(
     symbol: String,
     timestamp: String,
     underlying_value: f64,
+    spread: f64,  // Added spread parameter
 ) -> Option<RulesOutput> {
     let mut alerts = Vec::new();
     
@@ -56,12 +58,12 @@ pub fn run_rules(
         .unwrap_or("UNKNOWN"); 
         // Check CE (Call)
         if let Some(ce) = &opt.call {
-            alerts.extend(check_option_rules(&symbol,strike,expiry_str, "CE", ce));
+            alerts.extend(check_option_rules(&symbol, strike, expiry_str, "CE", ce, spread));
         }
         
         // Check PE (Put)
         if let Some(pe) = &opt.put {
-            alerts.extend(check_option_rules(&symbol,strike,expiry_str, "PE", pe));
+            alerts.extend(check_option_rules(&symbol, strike, expiry_str, "PE", pe, spread));
         }
     }
     
@@ -102,6 +104,7 @@ fn check_option_rules(
     expiry: &str,
     option_type: &str,
     detail: &ProcessedOptionDetail,
+    spread: f64,  // Added spread parameter
 ) -> Vec<Alert> {
     let mut alerts = Vec::new();
     let pchange_in_oi = detail.base.per_chg_oi.unwrap_or(0.0);
@@ -120,6 +123,7 @@ fn check_option_rules(
                 "{} {} {} strike has massive OI increase of {:.2}%",
                 symbol, option_type, strike, pchange_in_oi
             ),
+            spread,  // Include spread value
             values: AlertValues {
                 pchange_in_oi: Some(pchange_in_oi),
                 last_price,
@@ -142,6 +146,7 @@ fn check_option_rules(
                 "{} {} {} strike has massive OI decrease of {:.2}%",
                 symbol, option_type, strike, pchange_in_oi
             ),
+            spread,  // Include spread value
             values: AlertValues {
                 pchange_in_oi: Some(pchange_in_oi),
                 last_price,
@@ -165,6 +170,7 @@ fn check_option_rules(
                 "{} {} {} strike has low price of ₹{:.2}",
                 symbol, option_type, strike, lp
             ),
+            spread,  // Include spread value
             values: AlertValues {
                 pchange_in_oi: Some(pchange_in_oi),
                 last_price: Some(lp),  
@@ -181,12 +187,12 @@ fn check_option_rules(
 
 /// Run rules on batch data
 pub fn run_batch_rules(
-    batch_data: Vec<(String, String, f64, Vec<ProcessedOptionData>)>,
+    batch_data: Vec<(String, String, f64, Vec<ProcessedOptionData>, f64)>,  // Added spread to tuple
 ) -> Vec<RulesOutput> {
     batch_data
         .into_iter()
-        .filter_map(|(symbol, timestamp, underlying_value, data)| {
-            run_rules(&data, symbol, timestamp, underlying_value)
+        .filter_map(|(symbol, timestamp, underlying_value, data, spread)| {
+            run_rules(&data, symbol, timestamp, underlying_value, spread)
         })
         .collect()
 }
@@ -216,9 +222,10 @@ mod tests {
             time_val: 4.0,
         };
         
-        let alerts = check_option_rules("NIFTY",100.0,"30-DEC-2025", "CE", &detail);
+        let alerts = check_option_rules("NIFTY", 100.0, "30-DEC-2025", "CE", &detail, 2.5);
         assert_eq!(alerts.len(), 1);
         assert_eq!(alerts[0].alert_type, "HUGE_OI_INCREASE");
+        assert_eq!(alerts[0].spread, 2.5);
     }
     
     #[test]
@@ -240,9 +247,10 @@ mod tests {
             time_val: 4.0,
         };
         
-        let alerts = check_option_rules("NIFTY",100.0, "30-DEC-2025","CE", &detail);
+        let alerts = check_option_rules("NIFTY", 100.0, "30-DEC-2025", "CE", &detail, 3.0);
         assert_eq!(alerts.len(), 1);
         assert_eq!(alerts[0].alert_type, "HUGE_OI_DECREASE");
+        assert_eq!(alerts[0].spread, 3.0);
     }
     
     #[test]
@@ -264,9 +272,10 @@ mod tests {
             time_val: 1.5,
         };
         
-        let alerts = check_option_rules("NIFTY",100.0, "30-DEC-2025","CE", &detail);
+        let alerts = check_option_rules("NIFTY", 100.0, "30-DEC-2025", "CE", &detail, 1.8);
         assert_eq!(alerts.len(), 1);
         assert_eq!(alerts[0].alert_type, "LOW_PRICE");
+        assert_eq!(alerts[0].spread, 1.8);
     }
     
     #[test]
@@ -288,7 +297,8 @@ mod tests {
             time_val: 1.0,
         };
         
-        let alerts = check_option_rules("NIFTY",100.0, "30-DEC-2025","CE", &detail);
+        let alerts = check_option_rules("NIFTY", 100.0, "30-DEC-2025", "CE", &detail, 2.2);
         assert_eq!(alerts.len(), 2);  // Both HUGE_OI_INCREASE and LOW_PRICE
+        assert!(alerts.iter().all(|a| a.spread == 2.2));
     }
 }

@@ -106,12 +106,13 @@ async fn run_batch() -> Result<()> {
             "data": processed_data.clone(),
         }));
         
-        // Store for rules processing
+        // Store for rules processing - now includes spread
         batch_for_rules.push((
             security.symbol.clone(),
             chain.records.timestamp.clone(),
             chain.records.underlying_value,
             processed_data,
+            spread,  // Add spread to the tuple
         ));
     }
     
@@ -216,12 +217,13 @@ async fn run_single(symbol: &str, expiry: &str) -> Result<()> {
     
     println!("{} Data saved to single_output.json", "✓".green());
     
-    // Run rules on processed data
+    // Run rules on processed data - now pass spread parameter
     let rules_output = rules::run_rules(
         &processed_data,
         symbol.to_string(),
         chain.records.timestamp.clone(),
         chain.records.underlying_value,
+        spread,  // Pass the spread value
     );
     
     if let Some(output) = rules_output {
