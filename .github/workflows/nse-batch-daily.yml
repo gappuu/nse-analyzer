@@ -64,20 +64,31 @@ jobs:
           
           # Create alert type breakdown with security names
           echo "Creating alert breakdown table..."
+          echo "Debug: batch_rules.json content preview:"
+          jq -c '.[0:2]' batch_rules.json || echo "Failed to parse JSON"
           
-          # Get unique alert types
-          jq -r '[.[].alerts[].alert_type] | unique | .[]' batch_rules.json > /tmp/alert_types.txt
-          
-          # Create table data for each alert type
+          # Create table data for each alert type using a more robust approach
           echo "ALERT_TABLE_DATA<<EOF" >> $GITHUB_ENV
-          while IFS= read -r alert_type; do
-            if [ ! -z "$alert_type" ]; then
-              securities=$(jq -r --arg type "$alert_type" '.[] | select(.alerts[]?.alert_type == $type) | .symbol' batch_rules.json | sort | uniq | tr '\n' ',' | sed 's/,$//')
-              count=$(jq -r --arg type "$alert_type" '[.[].alerts[] | select(.alert_type == $type)] | length' batch_rules.json)
-              echo "${alert_type}|${count}|${securities}"
-            fi
-          done < /tmp/alert_types.txt
+          
+          # Get all alert types and their securities in one go
+          jq -r '
+            # Group all alerts by type
+            [.[].alerts[] | {type: .alert_type, symbol: .symbol}] | 
+            group_by(.type) | 
+            map({
+              alert_type: .[0].type, 
+              count: length, 
+              securities: [.[].symbol] | unique | join(",")
+            }) | 
+            sort_by(.count) | reverse | 
+            .[] | 
+            "\(.alert_type)|\(.count)|\(.securities)"
+          ' batch_rules.json | tee /tmp/debug_table.txt
+          
           echo "EOF" >> $GITHUB_ENV
+          
+          echo "Debug: Generated table data:"
+          cat /tmp/debug_table.txt
           
         else
           echo "ANALYSIS_SUCCESS=false" >> $GITHUB_ENV
@@ -97,41 +108,69 @@ jobs:
         
     - name: Format Alert Table
       id: format-table
-      if: env.ANALYSIS_SUCCESS == 'true'
+      if: always()  # Run even if analysis failed
       run: |
         # Format the alert table data into readable format
         formatted_table=""
-        if [ ! -z "${{ env.ALERT_TABLE_DATA }}" ]; then
-          while IFS='|' read -r alert_type count securities; do
+        
+        echo "Debug: ANALYSIS_SUCCESS = ${{ env.ANALYSIS_SUCCESS }}"
+        echo "Debug: ALERT_TABLE_DATA length = ${#ALERT_TABLE_DATA}"
+        
+        if [ "${{ env.ANALYSIS_SUCCESS }}" = "true" ] && [ ! -z "$ALERT_TABLE_DATA" ]; then
+          echo "Processing alert table data..."
+          echo "Raw data:"
+          echo "$ALERT_TABLE_DATA"
+          
+          # Process each line of alert table data
+          echo "$ALERT_TABLE_DATA" | while IFS='|' read -r alert_type count securities; do
             if [ ! -z "$alert_type" ]; then
+              echo "Processing: $alert_type | $count | $securities"
+              
               # Truncate long security lists for readability
-              if [ ${#securities} -gt 30 ]; then
-                securities_display="${securities:0:27}..."
+              if [ ${#securities} -gt 35 ]; then
+                securities_display="${securities:0:32}..."
               else
                 securities_display="$securities"
               fi
               
               # Format the table row
-              printf "%-25s | %-5s | %-30s\n" "$alert_type" "$count" "$securities_display" >> /tmp/formatted_table.txt
+              printf "%-25s | %-5s | %-35s\n" "$alert_type" "$count" "$securities_display" >> /tmp/formatted_table.txt
             fi
-          done <<< "${{ env.ALERT_TABLE_DATA }}"
+          done
           
           # Read the formatted table
-          formatted_table=$(cat /tmp/formatted_table.txt)
+          if [ -f /tmp/formatted_table.txt ]; then
+            formatted_table=$(cat /tmp/formatted_table.txt)
+            echo "Formatted table created successfully"
+          else
+            formatted_table="Alert Type                | Count | Securities\n--------------------------|-------|----------------------------\nNo detailed breakdown available"
+          fi
         else
-          formatted_table="No alerts generated"
+          if [ "${{ env.ANALYSIS_SUCCESS }}" = "true" ]; then
+            formatted_table="Alert Type                | Count | Securities\n--------------------------|-------|----------------------------\nNo alerts found - all securities clean!"
+          else
+            formatted_table="Alert Type                | Count | Securities\n--------------------------|-------|----------------------------\nAnalysis failed or timed out - no data available"
+          fi
         fi
         
-        # Set output for use in email
-        echo "formatted_table<<EOF" >> $GITHUB_OUTPUT
-        echo "$formatted_table" >> $GITHUB_OUTPUT
-        echo "EOF" >> $GITHUB_OUTPUT
+        # Set output for use in email (handle multiline properly)
+        {
+          echo "formatted_table<<EOF"
+          echo "Alert Type                | Count | Securities"
+          echo "--------------------------|-------|----------------------------"
+          if [ ! -z "$formatted_table" ]; then
+            echo "$formatted_table"
+          else
+            echo "No data available"
+          fi
+          echo "EOF"
+        } >> $GITHUB_OUTPUT
 
     - name: Generate IST Timestamp
       run: |
         IST_TIME=$(TZ="Asia/Kolkata" date +"%d %b %y %H:%M")
         echo "IST_TIMESTAMP=$IST_TIME" >> $GITHUB_ENV
-
+      
     - name: Send email notification
       if: always()  # Send email even if analysis fails
       uses: dawidd6/action-send-mail@v3
@@ -157,13 +196,13 @@ jobs:
           
           📈 ALERT BREAKDOWN TABLE
           ========================
-          ${{ env.ANALYSIS_SUCCESS == 'true' && steps.format-table.outputs.formatted_table || 'No data available - analysis failed or timed out.' }}
+          ${{ steps.format-table.outputs.formatted_table }}
           
-          ℹ️  TROUBLESHOOTING (if failed)
+          ${{ env.ANALYSIS_SUCCESS != 'true' && 'ℹ️  TROUBLESHOOTING
           • NSE API timeout (90 second limit)
           • Network connectivity issues  
           • NSE server problems
-          • Market hours/trading session status
+          • Market hours/trading session status' || '' }}
           
           🔗 ADDITIONAL INFO
           • Run ID: ${{ github.run_number }}
