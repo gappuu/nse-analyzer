@@ -111,20 +111,26 @@ jobs:
       if: always()  # Run even if analysis failed
       run: |
         # Format the alert table data into readable format
-        formatted_table=""
-        
         echo "Debug: ANALYSIS_SUCCESS = ${{ env.ANALYSIS_SUCCESS }}"
-        echo "Debug: ALERT_TABLE_DATA length = ${#ALERT_TABLE_DATA}"
+        echo "Debug: Checking ALERT_TABLE_DATA..."
         
-        if [ "${{ env.ANALYSIS_SUCCESS }}" = "true" ] && [ ! -z "$ALERT_TABLE_DATA" ]; then
+        # Read the ALERT_TABLE_DATA environment variable correctly
+        alert_data=$(cat << 'EOF'
+        ${{ env.ALERT_TABLE_DATA }}
+        EOF
+        )
+        
+        echo "Debug: Alert data content:"
+        echo "$alert_data"
+        echo "Debug: Alert data length: ${#alert_data}"
+        
+        if [ "${{ env.ANALYSIS_SUCCESS }}" = "true" ] && [ ! -z "$alert_data" ] && [ "$alert_data" != "" ]; then
           echo "Processing alert table data..."
-          echo "Raw data:"
-          echo "$ALERT_TABLE_DATA"
           
           # Process each line of alert table data
-          echo "$ALERT_TABLE_DATA" | while IFS='|' read -r alert_type count securities; do
-            if [ ! -z "$alert_type" ]; then
-              echo "Processing: $alert_type | $count | $securities"
+          while IFS='|' read -r alert_type count securities; do
+            if [ ! -z "$alert_type" ] && [ "$alert_type" != "" ]; then
+              echo "Processing row: [$alert_type] [$count] [$securities]"
               
               # Truncate long security lists for readability
               if [ ${#securities} -gt 35 ]; then
@@ -136,41 +142,45 @@ jobs:
               # Format the table row
               printf "%-25s | %-5s | %-35s\n" "$alert_type" "$count" "$securities_display" >> /tmp/formatted_table.txt
             fi
-          done
+          done <<< "$alert_data"
           
-          # Read the formatted table
-          if [ -f /tmp/formatted_table.txt ]; then
-            formatted_table=$(cat /tmp/formatted_table.txt)
-            echo "Formatted table created successfully"
+          # Check if we got any data
+          if [ -f /tmp/formatted_table.txt ] && [ -s /tmp/formatted_table.txt ]; then
+            echo "Table formatting successful!"
+            cat /tmp/formatted_table.txt
           else
-            formatted_table="Alert Type                | Count | Securities\n--------------------------|-------|----------------------------\nNo detailed breakdown available"
+            echo "No table data was generated"
+            echo "Alert Type                | Count | Securities" > /tmp/formatted_table.txt
+            echo "No detailed breakdown available (data parsing failed)" >> /tmp/formatted_table.txt
           fi
         else
+          echo "Creating fallback table..."
           if [ "${{ env.ANALYSIS_SUCCESS }}" = "true" ]; then
-            formatted_table="Alert Type                | Count | Securities\n--------------------------|-------|----------------------------\nNo alerts found - all securities clean!"
+            echo "Alert Type                | Count | Securities" > /tmp/formatted_table.txt
+            echo "No alerts found - all securities clean!" >> /tmp/formatted_table.txt
           else
-            formatted_table="Alert Type                | Count | Securities\n--------------------------|-------|----------------------------\nAnalysis failed or timed out - no data available"
+            echo "Alert Type                | Count | Securities" > /tmp/formatted_table.txt
+            echo "Analysis failed or timed out - no data available" >> /tmp/formatted_table.txt
           fi
         fi
         
         # Set output for use in email (handle multiline properly)
         {
           echo "formatted_table<<EOF"
-          echo "Alert Type                | Count | Securities"
-          echo "--------------------------|-------|----------------------------"
-          if [ ! -z "$formatted_table" ]; then
-            echo "$formatted_table"
+          if [ -f /tmp/formatted_table.txt ]; then
+            cat /tmp/formatted_table.txt
           else
-            echo "No data available"
+            echo "Alert Type                | Count | Securities"
+            echo "--------------------------|-------|----------------------------"
+            echo "Error: Could not generate table"
           fi
           echo "EOF"
         } >> $GITHUB_OUTPUT
-
     - name: Generate IST Timestamp
       run: |
         IST_TIME=$(TZ="Asia/Kolkata" date +"%d %b %y %H:%M")
         echo "IST_TIMESTAMP=$IST_TIME" >> $GITHUB_ENV
-      
+        
     - name: Send email notification
       if: always()  # Send email even if analysis fails
       uses: dawidd6/action-send-mail@v3
@@ -196,6 +206,8 @@ jobs:
           
           📈 ALERT BREAKDOWN TABLE
           ========================
+          Alert Type                | Count | Securities
+          --------------------------|-------|----------------------------
           ${{ steps.format-table.outputs.formatted_table }}
           
           ${{ env.ANALYSIS_SUCCESS != 'true' && 'ℹ️  TROUBLESHOOTING
