@@ -136,41 +136,38 @@ jobs:
             </tr>'
 
           # ALERT_TABLE_DATA lines are like: ALERT_TYPE|count|SEC1,SEC2,...
-            while IFS='|' read -r alert_type count securities; do
-              [ -z "$alert_type" ] && continue
+          while IFS='|' read -r alert_type count securities; do
+            [ -z "$alert_type" ] && continue
 
-              # Basic HTML escaping for &, <, >
-              esc_type=$(printf '%s' "$alert_type" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
-              esc_secs=$(printf '%s' "$securities" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+            # Basic HTML escaping for &, <, >
+            esc_type=$(printf '%s' "$alert_type"   | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+            esc_secs=$(printf '%s' "$securities"   | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
 
-          html_table="${html_table}
+            html_table="${html_table}
             <tr>
               <td>${esc_type}</td>
               <td align=\"right\">${count}</td>
               <td>${esc_secs}</td>
             </tr>"
-                        done <<EOF
-            $ALERT_TABLE_DATA
-            EOF
+          done <<< "$ALERT_TABLE_DATA"
 
-                html_table="${html_table}
+          html_table="${html_table}
           </table>"
 
           formatted_output="$html_table"
+        else
+          if [ "$ANALYSIS_SUCCESS" = "true" ]; then
+            formatted_output="<p>No alerts found - all securities clean!</p>"
           else
-            if [ "$ANALYSIS_SUCCESS" = "true" ]; then
-              formatted_output="<p>No alerts found - all securities clean!</p>"
-            else
-              formatted_output="<p>Analysis failed or timed out - no data available.</p>"
-            fi
+            formatted_output="<p>Analysis failed or timed out - no data available.</p>"
           fi
+        fi
 
-          {
-            echo "formatted_table<<EOF"
-            echo "$formatted_output"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-
+        {
+          echo "formatted_table<<EOF"
+          echo "$formatted_output"
+          echo "EOF"
+        } >> "$GITHUB_OUTPUT"
 
     - name: Generate IST Timestamp
       run: |
@@ -193,17 +190,18 @@ jobs:
               <body style="font-family: Arial, sans-serif; font-size: 14px;">
                 <h2>NSE Daily Analysis Report</h2>
                 <hr />
+                <br>
+                <h3>🧮 Processing Stats</h3>
+                <ul>
+                  <li><b>✓ Successful:</b> ${{ env.SUCCESS_COUNT || '0' }}</li>
+                  <li><b>✗ Failed:</b> ${{ env.FAILED_COUNT || '0' }}</li>
+                </ul>
+
                 <h3>📊 Summary</h3>
                 <ul>
                   <li><b>Securities with alerts:</b> ${{ env.SECURITY_COUNT || '0' }}</li>
                   <li><b>Total alerts generated:</b> ${{ env.ALERT_COUNT || '0' }}</li>
                   <li><b>Status:</b> ${{ env.ANALYSIS_SUCCESS == 'true' && '✅ Completed Successfully' || '❌ Failed/Timeout' }}</li>
-                </ul>
-
-                <h3>🧮 Processing Stats</h3>
-                <ul>
-                  <li><b>✓ Successful:</b> ${{ env.SUCCESS_COUNT || '0' }}</li>
-                  <li><b>✗ Failed:</b> ${{ env.FAILED_COUNT || '0' }}</li>
                 </ul>
 
                 <h3>🏢 Securities with Alerts</h3>
