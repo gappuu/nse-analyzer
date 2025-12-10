@@ -93,6 +93,11 @@ async fn run_batch() -> Result<()> {
             chain.records.underlying_value
         );
         
+        // Extract days_to_expiry from first processed option (they should all be the same)
+        let days_to_expiry = processed_data.first()
+            .map(|opt| opt.days_to_expiry)
+            .unwrap_or(0);
+        
         // Store for JSON output
         processed_batch.push(serde_json::json!({
             "record": {
@@ -100,6 +105,7 @@ async fn run_batch() -> Result<()> {
                 "timestamp": chain.records.timestamp,
                 "underlying_value": chain.records.underlying_value,
                 "spread": spread,
+                "days_to_expiry": days_to_expiry,
                 "ce_oi": chain.filtered.ce_totals.total_oi,
                 "pe_oi": chain.filtered.pe_totals.total_oi,
             },
@@ -145,7 +151,6 @@ async fn run_batch() -> Result<()> {
     }
     
     println!("{} Saved rules to batch_rules.json", "✓".green());
-    // println!("{} Total alerts across all securities: {}", "ℹ".blue(), total_alerts);
     
     println!();
     println!("{}", "=".repeat(60).blue());
@@ -196,12 +201,18 @@ async fn run_single(symbol: &str, expiry: &str) -> Result<()> {
         chain.records.underlying_value
     );
 
+    // Extract days_to_expiry from first processed option
+    let days_to_expiry = processed_data.first()
+        .map(|opt| opt.days_to_expiry)
+        .unwrap_or(0);
+
     // Save to JSON
     let data_single = serde_json::json!({
         "record": {
             "timestamp": chain.records.timestamp,
             "underlying_value": chain.records.underlying_value,
             "spread": spread,
+            "days_to_expiry": days_to_expiry,
             "expiry": expiry,
             "symbol": symbol,
             "ce_oi": chain.filtered.ce_totals.total_oi,
@@ -216,6 +227,7 @@ async fn run_single(symbol: &str, expiry: &str) -> Result<()> {
     )?;
     
     println!("{} Data saved to single_output.json", "✓".green());
+    println!("{} Days to expiry: {}", "ℹ".blue(), days_to_expiry);
     
     // Run rules on processed data - now pass spread parameter
     let rules_output = rules::run_rules(
@@ -248,11 +260,11 @@ async fn main() -> Result<()> {
     // CONFIGURATION - EDIT THIS SECTION
     // ========================================
     
-    let mode = "batch"; // Change to "batch" or "single"
+    let mode = "single"; // Change to "batch" or "single"
     
     // For single mode:
-    let symbol = "COALINDIA";
-    let expiry = "30-Dec-2025";
+    let symbol = "NIFTY";
+    let expiry = "23-Dec-2025";
     
     // ========================================
     

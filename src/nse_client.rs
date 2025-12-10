@@ -50,7 +50,7 @@ fn select_expiry<'a>(expiry_dates: &'a [String]) -> Result<&'a String> {
             }
 
             if date == today {
-                // Rule 1 & 4: today’s expiry
+                // Rule 1 & 4: today's expiry
                 if current_time < cutoff {
                     // Before 15:30 → use today
                     return Ok(&expiry_dates[idx]);

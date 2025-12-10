@@ -1,5 +1,7 @@
 use crate::models::{OptionData, OptionDetail};
 use serde::{Deserialize, Serialize};
+use chrono::{NaiveDate, Local};
+use anyhow::{Result, anyhow};
 
 /// Enhanced option detail with computed fields
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -10,6 +12,7 @@ pub struct ProcessedOptionDetail {
     pub the_money: String,  // "ATM", "1 ITM", "2 OTM", etc.
     pub tambu: Option<String>,  // "TMJ", "TMG", or None
     pub time_val: f64,
+    pub days_to_expiry: i32,  // Days remaining until expiry (0 on expiry day)
 }
 
 /// Processed option data with enhanced CE and PE
@@ -26,6 +29,31 @@ pub struct ProcessedOptionData {
     
     #[serde(rename = "PE")]
     pub put: Option<ProcessedOptionDetail>,
+    
+    pub days_to_expiry: i32,  // Days remaining until expiry (0 on expiry day)
+}
+
+/// Calculate days to expiry from today's date
+fn calculate_days_to_expiry(expiry_date_str: &str) -> Result<i32> {
+    // Parse the expiry date (format: "30-Dec-2025")
+    let expiry_date = NaiveDate::parse_from_str(expiry_date_str, "%d-%b-%Y")
+        .map_err(|e| anyhow!("Failed to parse expiry date '{}': {}", expiry_date_str, e))?;
+    
+    // Get today's date
+    let today = Local::now().date_naive();
+    
+    // Calculate difference in days
+    let days_diff = (expiry_date - today).num_days() as i32;
+    
+    // Check if today is after expiry (should not happen)
+    if days_diff < 0 {
+        return Err(anyhow!(
+            "Current date ({}) is after expiry date ({}). Days difference: {}",
+            today, expiry_date, days_diff
+        ));
+    }
+    
+    Ok(days_diff)
 }
 
 /// Process option chain data
@@ -49,12 +77,23 @@ pub fn process_option_data(
     // Step 2-4: Process each strike with classifications
     let mut processed: Vec<ProcessedOptionData> = data
         .into_iter()
-        .map(|opt| {
+        .filter_map(|opt| {
             let strike = opt.strike_price.unwrap_or(0.0);
+            let expiry_date_str = opt.expiry_date.as_ref()?;
             
-            ProcessedOptionData {
+            // Calculate days to expiry
+            let days_to_expiry = match calculate_days_to_expiry(expiry_date_str) {
+                Ok(days) => days,
+                Err(e) => {
+                    eprintln!("Warning: Failed to calculate days to expiry for {}: {}", expiry_date_str, e);
+                    return None; // Skip this option if expiry calculation fails
+                }
+            };
+            
+            Some(ProcessedOptionData {
                 expiry_date: opt.expiry_date.clone(),
                 strike_price: opt.strike_price,
+                days_to_expiry,
                 call: opt.call.map(|ce| process_option_detail(
                     ce,
                     strike,
@@ -62,6 +101,7 @@ pub fn process_option_data(
                     atm_strike,
                     &available_strikes,
                     true, // is_call
+                    days_to_expiry,
                 )),
                 put: opt.put.map(|pe| process_option_detail(
                     pe,
@@ -70,8 +110,9 @@ pub fn process_option_data(
                     atm_strike,
                     &available_strikes,
                     false, // is_call
+                    days_to_expiry,
                 )),
-            }
+            })
         })
         .collect();
     
@@ -135,6 +176,7 @@ fn process_option_detail(
     atm_strike: f64,
     available_strikes: &[f64],
     is_call: bool,
+    days_to_expiry: i32,
 ) -> ProcessedOptionDetail {
     // Step 2: Determine "the_money" with distance from ATM using indexing
     let the_money = classify_money_with_distance(strike, atm_strike, available_strikes, is_call);
@@ -155,6 +197,7 @@ fn process_option_detail(
         the_money,
         tambu,
         time_val,
+        days_to_expiry,
     }
 }
 
@@ -310,6 +353,25 @@ fn get_max_oi(opt: &ProcessedOptionData) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::{Local, Duration};
+    
+    #[test]
+    fn test_calculate_days_to_expiry() {
+        // Test with future date (tomorrow)
+        let tomorrow = Local::now().date_naive() + Duration::days(1);
+        let tomorrow_str = tomorrow.format("%d-%b-%Y").to_string();
+        assert_eq!(calculate_days_to_expiry(&tomorrow_str).unwrap(), 1);
+        
+        // Test with today (should be 0)
+        let today = Local::now().date_naive();
+        let today_str = today.format("%d-%b-%Y").to_string();
+        assert_eq!(calculate_days_to_expiry(&today_str).unwrap(), 0);
+        
+        // Test with past date (should error)
+        let yesterday = Local::now().date_naive() - Duration::days(1);
+        let yesterday_str = yesterday.format("%d-%b-%Y").to_string();
+        assert!(calculate_days_to_expiry(&yesterday_str).is_err());
+    }
     
     #[test]
     fn test_find_atm_strike() {

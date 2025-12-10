@@ -29,6 +29,7 @@ pub struct AlertValues {
     pub the_money: Option<String>,
 
     pub time_val: f64,
+    pub days_to_expiry: i32,  // Days remaining until expiry
 }
 
 /// Rules output structure
@@ -55,15 +56,17 @@ pub fn run_rules(
         let expiry_str = opt
         .expiry_date
         .as_deref()                  
-        .unwrap_or("UNKNOWN"); 
+        .unwrap_or("UNKNOWN");
+        let days_to_expiry = opt.days_to_expiry;
+        
         // Check CE (Call)
         if let Some(ce) = &opt.call {
-            alerts.extend(check_option_rules(&symbol, strike, expiry_str, "CE", ce, spread));
+            alerts.extend(check_option_rules(&symbol, strike, expiry_str, "CE", ce, spread, days_to_expiry));
         }
         
         // Check PE (Put)
         if let Some(pe) = &opt.put {
-            alerts.extend(check_option_rules(&symbol, strike, expiry_str, "PE", pe, spread));
+            alerts.extend(check_option_rules(&symbol, strike, expiry_str, "PE", pe, spread, days_to_expiry));
         }
     }
     
@@ -105,6 +108,7 @@ fn check_option_rules(
     option_type: &str,
     detail: &ProcessedOptionDetail,
     spread: f64,  // Added spread parameter
+    days_to_expiry: i32,  // Added days_to_expiry parameter
 ) -> Vec<Alert> {
     let mut alerts = Vec::new();
     let pchange_in_oi = detail.base.per_chg_oi.unwrap_or(0.0);
@@ -120,8 +124,8 @@ fn check_option_rules(
             option_type: option_type.to_string(),
             alert_type: "HUGE_OI_INCREASE".to_string(),
             description: format!(
-                "{} {} {} strike has massive OI increase of {:.2}%",
-                symbol, option_type, strike, pchange_in_oi
+                "{} {} {} strike has massive OI increase of {:.2}% ({} days to expiry)",
+                symbol, option_type, strike, pchange_in_oi, days_to_expiry
             ),
             spread,  // Include spread value
             values: AlertValues {
@@ -130,6 +134,7 @@ fn check_option_rules(
                 open_interest,
                 the_money: Some(detail.the_money.clone()),
                 time_val: detail.time_val.clone(),
+                days_to_expiry,
             },
         });
     }
@@ -143,8 +148,8 @@ fn check_option_rules(
             option_type: option_type.to_string(),
             alert_type: "HUGE_OI_DECREASE".to_string(),
             description: format!(
-                "{} {} {} strike has massive OI decrease of {:.2}%",
-                symbol, option_type, strike, pchange_in_oi
+                "{} {} {} strike has massive OI decrease of {:.2}% ({} days to expiry)",
+                symbol, option_type, strike, pchange_in_oi, days_to_expiry
             ),
             spread,  // Include spread value
             values: AlertValues {
@@ -153,6 +158,7 @@ fn check_option_rules(
                 open_interest,
                 the_money: Some(detail.the_money.clone()),
                 time_val: detail.time_val.clone(),
+                days_to_expiry,
             },
         });
     }
@@ -167,8 +173,8 @@ fn check_option_rules(
             option_type: option_type.to_string(),
             alert_type: "LOW_PRICE".to_string(),
             description: format!(
-                "{} {} {} strike has low price of ₹{:.2}",
-                symbol, option_type, strike, lp
+                "{} {} {} strike has low price of ₹{:.2} ({} days to expiry)",
+                symbol, option_type, strike, lp, days_to_expiry
             ),
             spread,  // Include spread value
             values: AlertValues {
@@ -177,6 +183,7 @@ fn check_option_rules(
                 open_interest,
                 the_money: Some(detail.the_money.clone()),
                 time_val: detail.time_val.clone(),
+                days_to_expiry,
             },
         });
         }
@@ -220,12 +227,14 @@ mod tests {
             the_money: "OTM".to_string(),
             tambu: None,
             time_val: 4.0,
+            days_to_expiry: 15,
         };
         
-        let alerts = check_option_rules("NIFTY", 100.0, "30-DEC-2025", "CE", &detail, 2.5);
+        let alerts = check_option_rules("NIFTY", 100.0, "30-DEC-2025", "CE", &detail, 2.5, 15);
         assert_eq!(alerts.len(), 1);
         assert_eq!(alerts[0].alert_type, "HUGE_OI_INCREASE");
         assert_eq!(alerts[0].spread, 2.5);
+        assert_eq!(alerts[0].values.days_to_expiry, 15);
     }
     
     #[test]
@@ -245,12 +254,14 @@ mod tests {
             the_money: "OTM".to_string(),
             tambu: None,
             time_val: 4.0,
+            days_to_expiry: 10,
         };
         
-        let alerts = check_option_rules("NIFTY", 100.0, "30-DEC-2025", "CE", &detail, 3.0);
+        let alerts = check_option_rules("NIFTY", 100.0, "30-DEC-2025", "CE", &detail, 3.0, 10);
         assert_eq!(alerts.len(), 1);
         assert_eq!(alerts[0].alert_type, "HUGE_OI_DECREASE");
         assert_eq!(alerts[0].spread, 3.0);
+        assert_eq!(alerts[0].values.days_to_expiry, 10);
     }
     
     #[test]
@@ -270,12 +281,14 @@ mod tests {
             the_money: "OTM".to_string(),
             tambu: None,
             time_val: 1.5,
+            days_to_expiry: 20,
         };
         
-        let alerts = check_option_rules("NIFTY", 100.0, "30-DEC-2025", "CE", &detail, 1.8);
+        let alerts = check_option_rules("NIFTY", 100.0, "30-DEC-2025", "CE", &detail, 1.8, 20);
         assert_eq!(alerts.len(), 1);
         assert_eq!(alerts[0].alert_type, "LOW_PRICE");
         assert_eq!(alerts[0].spread, 1.8);
+        assert_eq!(alerts[0].values.days_to_expiry, 20);
     }
     
     #[test]
@@ -295,10 +308,17 @@ mod tests {
             the_money: "OTM".to_string(),
             tambu: None,
             time_val: 1.0,
+            days_to_expiry: 5,  // Less than 7 days
         };
         
-        let alerts = check_option_rules("NIFTY", 100.0, "30-DEC-2025", "CE", &detail, 2.2);
-        assert_eq!(alerts.len(), 2);  // Both HUGE_OI_INCREASE and LOW_PRICE
+        let alerts = check_option_rules("NIFTY", 100.0, "15-DEC-2025", "CE", &detail, 2.2, 5);
+        // Should have 3 alerts: HUGE_OI_INCREASE, LOW_PRICE
+        assert_eq!(alerts.len(), 2);
         assert!(alerts.iter().all(|a| a.spread == 2.2));
+        assert!(alerts.iter().all(|a| a.values.days_to_expiry == 5));
+        
+        let alert_types: Vec<&String> = alerts.iter().map(|a| &a.alert_type).collect();
+        assert!(alert_types.contains(&&"HUGE_OI_INCREASE".to_string()));
+        assert!(alert_types.contains(&&"LOW_PRICE".to_string()));
     }
 }
