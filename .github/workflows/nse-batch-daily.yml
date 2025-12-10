@@ -2,7 +2,7 @@ name: NSE Daily Batch Analysis
 
 on:
   schedule:
-    # Run at 2:45 PM IST (10:30 AM UTC) on weekdays only
+    # Run at 2:45 PM IST (9:15 AM UTC) on weekdays only
     - cron: '15 9 * * 1-5'
   workflow_dispatch: # Allow manual trigger for testing
 
@@ -83,13 +83,13 @@ jobs:
       if: always()  # Send email even if analysis fails
       uses: dawidd6/action-send-mail@v3
       with:
-        server_address: ${{ secrets.EMAIL_SERVER }}
-        server_port: ${{ secrets.EMAIL_PORT }}
-        username: ${{ secrets.EMAIL_USERNAME }}
-        password: ${{ secrets.EMAIL_PASSWORD }}
+        server_address: smtp.gmail.com
+        server_port: 587
+        username: ${{ secrets.GMAIL_USERNAME }}
+        password: ${{ secrets.GMAIL_PASSWORD }}
         subject: "NSE Analysis Report - ${{ github.run_number }}"
-        to: ${{ secrets.EMAIL_TO }}
-        from: ${{ secrets.EMAIL_FROM }}
+        to: ${{ secrets.EMAIL_RECIPIENT }}
+        from: ${{ secrets.GMAIL_USERNAME }}
         body: |
           NSE Daily Analysis Completed
           
@@ -109,13 +109,13 @@ jobs:
       if: failure()
       uses: dawidd6/action-send-mail@v3
       with:
-        server_address: ${{ secrets.EMAIL_SERVER }}
-        server_port: ${{ secrets.EMAIL_PORT }}
-        username: ${{ secrets.EMAIL_USERNAME }}
-        password: ${{ secrets.EMAIL_PASSWORD }}
+        server_address: smtp.gmail.com
+        server_port: 587
+        username: ${{ secrets.GMAIL_USERNAME }}
+        password: ${{ secrets.GMAIL_PASSWORD }}
         subject: "🚨 NSE Analysis FAILED - ${{ github.run_number }}"
-        to: ${{ secrets.EMAIL_TO }}
-        from: ${{ secrets.EMAIL_FROM }}
+        to: ${{ secrets.EMAIL_RECIPIENT }}
+        from: ${{ secrets.GMAIL_USERNAME }}
         body: |
           ⚠️ NSE Daily Analysis Failed
           
