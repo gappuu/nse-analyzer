@@ -127,6 +127,11 @@ jobs:
         echo "$formatted_table" >> $GITHUB_OUTPUT
         echo "EOF" >> $GITHUB_OUTPUT
 
+    - name: Generate IST Timestamp
+      run: |
+        IST_TIME=$(TZ="Asia/Kolkata" date +"%d %b %y %H:%M")
+        echo "IST_TIMESTAMP=$IST_TIME" >> $GITHUB_ENV
+
     - name: Send email notification
       if: always()  # Send email even if analysis fails
       uses: dawidd6/action-send-mail@v3
@@ -135,7 +140,7 @@ jobs:
         server_port: 587
         username: ${{ secrets.GMAIL_USERNAME }}
         password: ${{ secrets.GMAIL_PASSWORD }}
-        subject: "NSE Analysis Report - ${{ github.run_number }} (${{ env.ANALYSIS_SUCCESS == 'true' && 'SUCCESS' || 'FAILED' }})"
+        subject: "NSE Analysis Report - ${{ env.IST_TIMESTAMP }} (${{ env.ANALYSIS_SUCCESS == 'true' && 'SUCCESS' || 'FAILED' }})"
         to: ${{ secrets.EMAIL_RECIPIENT }}
         from: ${{ secrets.GMAIL_USERNAME }}
         body: |
@@ -164,7 +169,7 @@ jobs:
           • Run ID: ${{ github.run_number }}
           • Repository: ${{ github.repository }}
           • Full artifacts: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          • Generated at: $(date '+%Y-%m-%d %H:%M:%S UTC')
+          • Generated at: ${{ env.IST_TIMESTAMP }}
         attachments: batch_rules.json
         
     - name: Notification on failure
@@ -175,7 +180,7 @@ jobs:
         server_port: 587
         username: ${{ secrets.GMAIL_USERNAME }}
         password: ${{ secrets.GMAIL_PASSWORD }}
-        subject: "🚨 NSE Analysis FAILED - ${{ github.run_number }}"
+        subject: "🚨 NSE Analysis FAILED - ${{ env.IST_TIMESTAMP }}"
         to: ${{ secrets.EMAIL_RECIPIENT }}
         from: ${{ secrets.GMAIL_USERNAME }}
         body: |
@@ -183,6 +188,7 @@ jobs:
           
           Run ID: ${{ github.run_number }}
           Repository: ${{ github.repository }}
+          Generated at: ${{ env.IST_TIMESTAMP }}
           
           Please check the logs at:
           ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
