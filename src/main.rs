@@ -260,7 +260,7 @@ async fn main() -> Result<()> {
     // CONFIGURATION - EDIT THIS SECTION
     // ========================================
     
-    let mode = "single"; // Change to "batch" or "single"
+    let mode = "batch"; // Change to "batch" or "single"
     
     // For single mode:
     let symbol = "NIFTY";
