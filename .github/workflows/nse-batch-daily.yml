@@ -30,16 +30,18 @@ jobs:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
-          target/
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          backend/target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
         restore-keys: |
           ${{ runner.os }}-cargo-
           
     - name: Build NSE Analyzer
+      working-directory: backend
       run: cargo build --release
       
     - name: Run NSE Batch Analysis
       timeout-minutes: 3  # Kill this step after 3 minutes (180 seconds)
+      working-directory: backend
       run: |
         # Set environment for batch mode only
         export NSE_MODE=batch
@@ -132,7 +134,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: nse-batch-rules-${{ github.run_number }}
-        path: batch_rules.json
+        path: backend/batch_rules.json
         retention-days: 10
         
     - name: Format Alert Table
@@ -247,7 +249,7 @@ jobs:
                 </ul>
               </body>
             </html>
-        attachments: batch_rules.json
+        attachments: backend/batch_rules.json
 
     - name: Notification on failure
       if: failure()
