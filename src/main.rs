@@ -3,6 +3,7 @@ mod models;
 mod nse_client;
 mod processor;
 mod rules;
+mod api_server_axum;  // Use the new Axum-based server
 
 use anyhow::Result;
 use colored::Colorize;
@@ -258,6 +259,16 @@ async fn run_single(symbol: &str, expiry: &str) -> Result<()> {
     Ok(())
 }
 
+/// Run API server mode
+async fn run_server(port: u16) -> Result<()> {
+    println!("{}", "=".repeat(60).blue());
+    println!("{}", "NSE API Server".green().bold());
+    println!("{}", "=".repeat(60).blue());
+    println!();
+
+    api_server_axum::start_server(port).await
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     // ========================================
@@ -270,12 +281,18 @@ async fn main() -> Result<()> {
     let symbol = config::get_single_symbol();
     let expiry = config::get_single_expiry();
     
+    // For server mode:
+    let port = std::env::var("NSE_PORT")
+        .unwrap_or_else(|_| "3001".to_string())
+        .parse::<u16>()
+        .unwrap_or(3001);
+    
     // Log configuration for CI environments
     if config::is_ci_environment() {
         println!("{}", "Running in CI environment (GitHub Actions)".blue());
         println!("{} Mode: {}", "→".cyan(), mode.yellow());
-        if mode == "single" {
-            println!("{} Single mode not supported in CI - switching to batch", "⚠".yellow());
+        if mode == "single" || mode == "server" {
+            println!("{} Single/Server mode not supported in CI - switching to batch", "⚠".yellow());
         }
         println!();
     }
@@ -283,6 +300,15 @@ async fn main() -> Result<()> {
     // ========================================
     
     match mode.as_str() {
+        "server" => {
+            if config::is_ci_environment() {
+                // Force batch mode in CI
+                println!("{} GitHub Actions only supports batch mode, running batch instead", "ℹ".blue());
+                run_batch().await?;
+            } else {
+                run_server(port).await?;
+            }
+        }
         "batch" => run_batch().await?,
         "single" => {
             if config::is_ci_environment() {
@@ -299,8 +325,12 @@ async fn main() -> Result<()> {
                 println!("{} GitHub Actions only supports batch mode, switching to batch", "ℹ".blue());
                 run_batch().await?;
             } else {
-                eprintln!("Invalid mode '{}'. Use 'batch' or 'single'", mode);
+                eprintln!("Invalid mode '{}'. Use 'batch', 'single', or 'server'", mode);
                 eprintln!("Set NSE_MODE environment variable to control execution mode");
+                eprintln!("Examples:");
+                eprintln!("  NSE_MODE=server NSE_PORT=3001 cargo run   # Start API server on port 3001");
+                eprintln!("  NSE_MODE=batch cargo run                   # Run batch analysis");
+                eprintln!("  NSE_MODE=single NSE_SYMBOL=NIFTY NSE_EXPIRY=30-Dec-2025 cargo run");
                 eprintln!("Note: GitHub Actions only supports 'batch' mode");
                 std::process::exit(1);
             }
