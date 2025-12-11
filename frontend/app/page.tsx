@@ -1,65 +1,295 @@
-import Image from "next/image";
+'use client';
 
-export default function Home() {
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+import React, { useState, useEffect } from 'react';
+import Link from 'next/link';
+import { 
+  // TrendingUp, 
+  Search, 
+  BarChart3, 
+  AlertCircle, 
+  Loader2,
+  ArrowRight,
+  Target
+} from 'lucide-react';
+import { apiClient, handleApiError } from '@/app/lib/api';
+import { SecurityInfo, SecurityListResponse } from '@/app/types/api';
+
+export default function HomePage() {
+  const [securities, setSecurities] = useState<SecurityListResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedLetter, setSelectedLetter] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchSecurities();
+  }, []);
+
+  const fetchSecurities = async () => {
+    try {
+      setLoading(true);
+      const response = await apiClient.getSecurities();
+      
+      if (response.success && response.data) {
+        setSecurities(response.data);
+      } else {
+        setError(response.error || 'Failed to fetch securities');
+      }
+    } catch (err) {
+      setError(handleApiError(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const filteredSecurities = React.useMemo(() => {
+    if (!securities) return null;
+
+    let filtered: SecurityInfo[] = [];
+
+    // Add indices first
+    filtered = [...securities.indices];
+
+    // Add filtered equities
+    if (selectedLetter) {
+      const letterSecurities = securities.equities[selectedLetter] || [];
+      filtered = [...filtered, ...letterSecurities];
+    } else {
+      // Add all equities if no letter selected
+      Object.values(securities.equities).forEach(letterGroup => {
+        filtered = [...filtered, ...letterGroup];
+      });
+    }
+
+    // Apply search filter
+    if (searchTerm) {
+      filtered = filtered.filter(security =>
+        security.symbol.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+    }
+
+    return filtered;
+  }, [securities, searchTerm, selectedLetter]);
+
+  const availableLetters = securities ? Object.keys(securities.equities).sort() : [];
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-12 h-12 animate-spin mx-auto text-nse-accent mb-4" />
+          <p className="text-gray-400 text-lg">Loading securities...</p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center max-w-md">
+          <AlertCircle className="w-16 h-16 text-nse-error mx-auto mb-4" />
+          <h1 className="text-2xl font-bold text-gray-100 mb-2">Error Loading Data</h1>
+          <p className="text-gray-400 mb-6">{error}</p>
+          <button 
+            onClick={fetchSecurities}
+            className="btn-primary"
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+            Try Again
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen">
+      {/* Header */}
+      <header className="py-8 px-4 border-b border-gray-700/50">
+        <div className="max-w-7xl mx-auto">
+          <div className="text-center mb-8">
+            <h1 className="text-4xl md:text-6xl font-display font-bold mb-4">
+              <span className="text-gradient">NSE Options</span>
+              <br />
+              <span className="text-gradient-blue">Analyzer</span>
+            </h1>
+            <p className="text-gray-400 text-lg max-w-2xl mx-auto">
+              Advanced F&O analysis platform with real-time options chain data, 
+              intelligent alerts, and comprehensive market insights.
+            </p>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex flex-col sm:flex-row gap-4 justify-center items-center mb-8">
+            <Link href="/batch" className="btn-success inline-flex items-center">
+              <BarChart3 className="w-5 h-5 mr-2" />
+              Batch Analysis - All F&O
+              <ArrowRight className="w-4 h-4 ml-2" />
+            </Link>
+            <div className="text-gray-500">or select individual security below</div>
+          </div>
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <main className="py-8 px-4">
+        <div className="max-w-7xl mx-auto">
+          {/* Search and Filter Controls */}
+          <div className="card-glow rounded-lg p-6 mb-8">
+            <div className="flex flex-col lg:flex-row gap-4 items-center">
+              {/* Search */}
+              <div className="relative flex-1 max-w-md">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+                <input
+                  type="text"
+                  placeholder="Search securities..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full pl-10 pr-4 py-3 bg-slate-800 border border-gray-600 rounded-lg 
+                           focus:border-nse-accent focus:ring-2 focus:ring-nse-accent/20 
+                           text-gray-100 placeholder-gray-400 transition-colors"
+                />
+              </div>
+
+              {/* Letter Filter */}
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => setSelectedLetter(null)}
+                  className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    selectedLetter === null
+                      ? 'bg-nse-accent text-white'
+                      : 'bg-slate-700 text-gray-300 hover:bg-slate-600'
+                  }`}
+                >
+                  All
+                </button>
+                {availableLetters.map((letter) => (
+                  <button
+                    key={letter}
+                    onClick={() => setSelectedLetter(letter)}
+                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                      selectedLetter === letter
+                        ? 'bg-nse-accent text-white'
+                        : 'bg-slate-700 text-gray-300 hover:bg-slate-600'
+                    }`}
+                  >
+                    {letter}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Securities Grid */}
+          {filteredSecurities && (
+            <div className="space-y-8">
+              {securities?.indices && securities.indices.length > 0 && (
+                selectedLetter === null || securities.indices.some(s => 
+                  s.symbol.toLowerCase().includes(searchTerm.toLowerCase())
+                )
+              ) && (
+                <section className="animate-fade-in">
+                  <h2 className="text-2xl font-bold text-gray-100 mb-4 flex items-center">
+                    <Target className="w-6 h-6 mr-2 text-nse-accent" />
+                    Indices
+                  </h2>
+                  <div className="security-grid">
+                    {securities.indices
+                      .filter(security => 
+                        searchTerm === '' || 
+                        security.symbol.toLowerCase().includes(searchTerm.toLowerCase())
+                      )
+                      .map((security, index) => (
+                        <SecurityCard 
+                          key={security.symbol} 
+                          security={security} 
+                          index={index}
+                        />
+                      ))}
+                  </div>
+                </section>
+              )}
+
+              {/* Equities by Letter or All */}
+              {selectedLetter ? (
+                <section className="animate-fade-in">
+                  <h2 className="text-2xl font-bold text-gray-100 mb-4">
+                    Securities - {selectedLetter}
+                  </h2>
+                  <div className="security-grid">
+                    {(securities?.equities[selectedLetter] || [])
+                      .filter(security => 
+                        searchTerm === '' || 
+                        security.symbol.toLowerCase().includes(searchTerm.toLowerCase())
+                      )
+                      .map((security, index) => (
+                        <SecurityCard 
+                          key={security.symbol} 
+                          security={security} 
+                          index={index}
+                        />
+                      ))}
+                  </div>
+                </section>
+              ) : (
+                <section className="animate-fade-in">
+                  <h2 className="text-2xl font-bold text-gray-100 mb-4">
+                    All Equities
+                  </h2>
+                  <div className="security-grid">
+                    {Object.entries(securities?.equities || {})
+                      .flatMap(([letter, letterSecurities]) => letterSecurities)
+                      .filter(security => 
+                        searchTerm === '' || 
+                        security.symbol.toLowerCase().includes(searchTerm.toLowerCase())
+                      )
+                      .map((security, index) => (
+                        <SecurityCard 
+                          key={security.symbol} 
+                          security={security} 
+                          index={index}
+                        />
+                      ))}
+                  </div>
+                </section>
+              )}
+
+              {filteredSecurities.length === 0 && (
+                <div className="text-center py-12">
+                  <Search className="w-16 h-16 text-gray-600 mx-auto mb-4" />
+                  <h3 className="text-xl font-semibold text-gray-400 mb-2">No securities found</h3>
+                  <p className="text-gray-500">Try adjusting your search or filter criteria</p>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </main>
     </div>
+  );
+}
+
+// Security Card Component
+function SecurityCard({ security, index }: { security: SecurityInfo; index: number }) {
+  return (
+    <Link 
+      href={`/security/${security.symbol}`} 
+      className="security-card group"
+      style={{ animationDelay: `${index * 0.05}s` }}
+    >
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="font-display font-semibold text-lg text-gray-100 group-hover:text-nse-accent transition-colors">
+            {security.symbol}
+          </h3>
+          <p className="text-sm text-gray-400 mt-1">
+            {security.security_type === 'Indices' ? '📊 Index' : '🏢 Equity'}
+          </p>
+        </div>
+        <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+          <ArrowRight className="w-5 h-5 text-nse-accent" />
+        </div>
+      </div>
+    </Link>
   );
 }
