@@ -16,9 +16,9 @@ rand = "0.8"
 urlencoding = "2"
 
 # HTTP server
-axum = "0.7"
-tower = "0.4"
-tower-http = { version = "0.5", features = ["cors"] }
+axum = "0.8"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors"] }
 
 # Optional: logging
 tracing = "0.1"
