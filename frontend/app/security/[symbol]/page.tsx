@@ -423,50 +423,69 @@ export default function SecurityPage() {
                     <table className="data-table">
                       <thead>
                         <tr>
-                          <th>Strike</th>
-                          <th>CE LTP</th>
                           <th>CE OI</th>
                           <th>CE %OI</th>
-                          <th>CE Time Val</th>
                           <th>CE Money</th>
+                          <th>CE %LTP</th>
+                          <th>CE LTP</th>
+                          <th>CE Tambu</th>
+                          <th>STRIKE</th>
+                          <th>PE Tambu</th>
+                          <th>PE LTP</th>
+                          <th>PE %LTP</th>
                           <th>PE Money</th>
-                          <th>PE Time Val</th>
                           <th>PE %OI</th>
                           <th>PE OI</th>
-                          <th>PE LTP</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {analysisData.data.processed_data.map((option, index) => (
+                        {analysisData.data.processed_data
+                          .sort((a, b) => (b.strikePrice || 0) - (a.strikePrice || 0))
+                          .map((option, index) => (
                           <tr key={index}>
-                            <td className="font-bold text-center bg-slate-700/50">
-                              ₹{option.strikePrice}
-                            </td>
                             {/* CE Data */}
-                            <td className="text-green-400">
-                              {option.CE?.lastPrice ? `₹${option.CE.lastPrice.toFixed(2)}` : '-'}
-                            </td>
                             <td>
-                              {option.CE?.openInterest ? 
-                                (option.CE.openInterest / 100000).toFixed(1) + 'L' : '-'}
+                              {Number(option.CE?.openInterest) || '-'}
                             </td>
                             <td className={option.CE?.pchangeinOpenInterest ? 
                               (option.CE.pchangeinOpenInterest > 0 ? 'text-green-400' : 'text-red-400') : ''}>
                               {option.CE?.pchangeinOpenInterest ? 
                                 `${option.CE.pchangeinOpenInterest > 0 ? '+' : ''}${option.CE.pchangeinOpenInterest.toFixed(1)}%` : '-'}
                             </td>
-                            <td>
-                              {option.CE ? `₹${option.CE.time_val.toFixed(2)}` : '-'}
-                            </td>
                             <td className={option.CE ? getMoneyStatusColor(option.CE.the_money) : ''}>
                               {option.CE?.the_money || '-'}
                             </td>
+                            <td className={option.CE?.pchange ? 
+                              (option.CE.pchange > 0 ? 'text-green-400' : 'text-red-400') : ''}>
+                              {option.CE?.pchange ? 
+                                `${option.CE.pchange > 0 ? '+' : ''}${option.CE.pchange.toFixed(1)}%` : '-'}
+                            </td>
+                            <td className="text-green-400">
+                              {option.CE?.lastPrice ? `₹${option.CE.lastPrice.toFixed(2)}` : '-'}
+                            </td>
+                            <td className="text-gray-300">
+                              {option.CE?.tambu || '-'}
+                            </td>
+                            
+                            {/* Strike Price */}
+                            <td className="font-bold text-center bg-slate-700/50">
+                              {option.strikePrice}
+                            </td>
+                            
                             {/* PE Data */}
+                            <td className="text-gray-300">
+                              {option.PE?.tambu || '-'}
+                            </td>
+                            <td className="text-red-400">
+                              {option.PE?.lastPrice ? `₹${option.PE.lastPrice.toFixed(2)}` : '-'}
+                            </td>
+                            <td className={option.PE?.pchange ? 
+                              (option.PE.pchange > 0 ? 'text-green-400' : 'text-red-400') : ''}>
+                              {option.PE?.pchange ? 
+                                `${option.PE.pchange > 0 ? '+' : ''}${option.PE.pchange.toFixed(1)}%` : '-'}
+                            </td>
                             <td className={option.PE ? getMoneyStatusColor(option.PE.the_money) : ''}>
                               {option.PE?.the_money || '-'}
-                            </td>
-                            <td>
-                              {option.PE ? `₹${option.PE.time_val.toFixed(2)}` : '-'}
                             </td>
                             <td className={option.PE?.pchangeinOpenInterest ? 
                               (option.PE.pchangeinOpenInterest > 0 ? 'text-green-400' : 'text-red-400') : ''}>
@@ -474,11 +493,9 @@ export default function SecurityPage() {
                                 `${option.PE.pchangeinOpenInterest > 0 ? '+' : ''}${option.PE.pchangeinOpenInterest.toFixed(1)}%` : '-'}
                             </td>
                             <td>
-                              {option.PE?.openInterest ? 
-                                (option.PE.openInterest / 100000).toFixed(1) + 'L' : '-'}
-                            </td>
-                            <td className="text-red-400">
-                              {option.PE?.lastPrice ? `₹${option.PE.lastPrice.toFixed(2)}` : '-'}
+                              {/* {option.PE?.openInterest ? 
+                                (option.PE.openInterest / 100000).toFixed(1) + 'L' : '-'} */}
+                              {Number(option.PE?.openInterest) || '-'}
                             </td>
                           </tr>
                         ))}
