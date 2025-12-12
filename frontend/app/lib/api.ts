@@ -6,6 +6,7 @@ import {
   SingleAnalysisResponse,
   BatchAnalysisResponse,
 } from '@/app/types/api';
+import { db, DB_KEYS } from '@/app/lib/db';
 
 const API_BASE_URL = process.env.NODE_ENV === 'development' 
   ? 'http://localhost:3001'
@@ -16,31 +17,166 @@ const api = axios.create({
   timeout: 120000, // 2 minutes timeout for batch operations
 });
 
+// Enhanced API client with database integration
 export const apiClient = {
-  async getSecurities(): Promise<ApiResponse<SecurityListResponse>> {
-    const response = await api.get('/api/securities');
-    return response.data;
+  // Securities List
+  async getSecurities(forceRefresh = false): Promise<ApiResponse<SecurityListResponse>> {
+    try {
+      // Check if we should use cached data
+      if (!forceRefresh) {
+        const cachedData = await db.getData<SecurityListResponse>(DB_KEYS.SECURITIES_LIST);
+        if (cachedData) {
+          return {
+            success: true,
+            data: cachedData.data,
+            fromCache: true,
+            cachedAt: cachedData.timestamp,
+            lastUpdated: cachedData.lastUpdated
+          } as ApiResponse<SecurityListResponse> & { fromCache: boolean; cachedAt: string; lastUpdated: number };
+        }
+      }
+
+      // Fetch from API
+      const response = await api.get('/api/securities');
+      const apiResponse: ApiResponse<SecurityListResponse> = response.data;
+
+      // Store in database if successful
+      if (apiResponse.success && apiResponse.data) {
+        await db.storeData(DB_KEYS.SECURITIES_LIST, apiResponse.data);
+      }
+
+      return apiResponse;
+    } catch (error) {
+      console.error('Error fetching securities:', error);
+      throw error;
+    }
   },
 
-  async getContractInfo(symbol: string): Promise<ApiResponse<ContractInfoResponse>> {
-    const response = await api.get(`/api/contract-info?symbol=${encodeURIComponent(symbol)}`);
-    return response.data;
+  // Contract Info
+  async getContractInfo(symbol: string, forceRefresh = false): Promise<ApiResponse<ContractInfoResponse>> {
+    try {
+      const key = DB_KEYS.CONTRACT_INFO(symbol);
+      
+      // Check if we should use cached data
+      if (!forceRefresh) {
+        const cachedData = await db.getData<ContractInfoResponse>(key);
+        if (cachedData) {
+          return {
+            success: true,
+            data: cachedData.data,
+            fromCache: true,
+            cachedAt: cachedData.timestamp,
+            lastUpdated: cachedData.lastUpdated
+          } as ApiResponse<ContractInfoResponse> & { fromCache: boolean; cachedAt: string; lastUpdated: number };
+        }
+      }
+
+      // Fetch from API
+      const response = await api.get(`/api/contract-info?symbol=${encodeURIComponent(symbol)}`);
+      const apiResponse: ApiResponse<ContractInfoResponse> = response.data;
+
+      // Store in database if successful
+      if (apiResponse.success && apiResponse.data) {
+        await db.storeData(key, apiResponse.data);
+      }
+
+      return apiResponse;
+    } catch (error) {
+      console.error('Error fetching contract info:', error);
+      throw error;
+    }
   },
 
+  // Single Analysis
   async getSingleAnalysis(
     symbol: string,
-    expiry: string
+    expiry: string,
+    forceRefresh = false
   ): Promise<ApiResponse<SingleAnalysisResponse>> {
-    const response = await api.get(
-      `/api/single-analysis?symbol=${encodeURIComponent(symbol)}&expiry=${encodeURIComponent(expiry)}`
-    );
-    return response.data;
+    try {
+      const key = DB_KEYS.SINGLE_ANALYSIS(symbol, expiry);
+      
+      // Check if we should use cached data
+      if (!forceRefresh) {
+        const cachedData = await db.getData<SingleAnalysisResponse>(key);
+        if (cachedData) {
+          return {
+            success: true,
+            data: cachedData.data,
+            fromCache: true,
+            cachedAt: cachedData.timestamp,
+            lastUpdated: cachedData.lastUpdated
+          } as ApiResponse<SingleAnalysisResponse> & { fromCache: boolean; cachedAt: string; lastUpdated: number };
+        }
+      }
+
+      // Fetch from API
+      const response = await api.get(
+        `/api/single-analysis?symbol=${encodeURIComponent(symbol)}&expiry=${encodeURIComponent(expiry)}`
+      );
+      const apiResponse: ApiResponse<SingleAnalysisResponse> = response.data;
+
+      // Store in database if successful
+      if (apiResponse.success && apiResponse.data) {
+        await db.storeData(key, apiResponse.data);
+      }
+
+      return apiResponse;
+    } catch (error) {
+      console.error('Error fetching single analysis:', error);
+      throw error;
+    }
   },
 
-  async getBatchAnalysis(): Promise<ApiResponse<BatchAnalysisResponse>> {
-    const response = await api.post('/api/batch-analysis');
-    return response.data;
+  // Batch Analysis
+  async getBatchAnalysis(forceRefresh = false): Promise<ApiResponse<BatchAnalysisResponse>> {
+    try {
+      // Check if we should use cached data
+      if (!forceRefresh) {
+        const cachedData = await db.getData<BatchAnalysisResponse>(DB_KEYS.BATCH_ANALYSIS);
+        if (cachedData) {
+          return {
+            success: true,
+            data: cachedData.data,
+            fromCache: true,
+            cachedAt: cachedData.timestamp,
+            lastUpdated: cachedData.lastUpdated
+          } as ApiResponse<BatchAnalysisResponse> & { fromCache: boolean; cachedAt: string; lastUpdated: number };
+        }
+      }
+
+      // Fetch from API
+      const response = await api.post('/api/batch-analysis');
+      const apiResponse: ApiResponse<BatchAnalysisResponse> = response.data;
+
+      // Store in database if successful
+      if (apiResponse.success && apiResponse.data) {
+        await db.storeData(DB_KEYS.BATCH_ANALYSIS, apiResponse.data);
+      }
+
+      return apiResponse;
+    } catch (error) {
+      console.error('Error fetching batch analysis:', error);
+      throw error;
+    }
   },
+
+  // Check if data exists in cache
+  async hasSecurities(): Promise<boolean> {
+    return await db.hasData(DB_KEYS.SECURITIES_LIST);
+  },
+
+  async hasContractInfo(symbol: string): Promise<boolean> {
+    return await db.hasData(DB_KEYS.CONTRACT_INFO(symbol));
+  },
+
+  async hasSingleAnalysis(symbol: string, expiry: string): Promise<boolean> {
+    return await db.hasData(DB_KEYS.SINGLE_ANALYSIS(symbol, expiry));
+  },
+
+  async hasBatchAnalysis(): Promise<boolean> {
+    return await db.hasData(DB_KEYS.BATCH_ANALYSIS);
+  }
 };
 
 // Error handler utility

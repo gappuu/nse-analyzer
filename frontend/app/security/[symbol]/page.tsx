@@ -12,19 +12,24 @@ import {
   Clock,
   DollarSign,
   BarChart3,
+  RefreshCw,
+  Database
 } from 'lucide-react';
 import { apiClient, handleApiError, getAlertBadgeClass, formatCurrency } from '@/app/lib/api';
-import { ContractInfoResponse, SingleAnalysisResponse } from '@/app/types/api';
+import { db } from '@/app/lib/db';
+import { ContractInfoResponse, SingleAnalysisResponse, DataWithAge } from '@/app/types/api';
 
 export default function SecurityPage() {
   const params = useParams();
   const symbol = params.symbol as string;
   
-  const [contractInfo, setContractInfo] = useState<ContractInfoResponse | null>(null);
+  const [contractData, setContractData] = useState<DataWithAge<ContractInfoResponse> | null>(null);
   const [selectedExpiry, setSelectedExpiry] = useState<string | null>(null);
-  const [analysisData, setAnalysisData] = useState<SingleAnalysisResponse | null>(null);
+  const [analysisData, setAnalysisData] = useState<DataWithAge<SingleAnalysisResponse> | null>(null);
   const [loading, setLoading] = useState(true);
   const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [fetching, setFetching] = useState(false);
+  const [analysisFetching, setAnalysisFetching] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -36,7 +41,14 @@ export default function SecurityPage() {
         const response = await apiClient.getContractInfo(symbol);
         
         if (response.success && response.data) {
-          setContractInfo(response.data);
+          const dataWithAge: DataWithAge<ContractInfoResponse> = {
+            data: response.data,
+            age: response.lastUpdated ? db.getDataAge(response.lastUpdated) : 'just now',
+            lastUpdated: response.lastUpdated || Date.now(),
+            fromCache: response.fromCache || false
+          };
+          setContractData(dataWithAge);
+          
           // Auto-select first expiry
           if (response.data.expiry_dates.length > 0) {
             setSelectedExpiry(response.data.expiry_dates[0]);
@@ -56,14 +68,24 @@ export default function SecurityPage() {
     }
   }, [symbol]);
 
-  const fetchAnalysis = async (expiry: string) => {
+  const fetchAnalysis = async (expiry: string, forceRefresh = false) => {
     try {
-      setAnalysisLoading(true);
+      if (forceRefresh) {
+        setAnalysisFetching(true);
+      } else {
+        setAnalysisLoading(true);
+      }
       
-      const response = await apiClient.getSingleAnalysis(symbol, expiry);
+      const response = await apiClient.getSingleAnalysis(symbol, expiry, forceRefresh);
       
       if (response.success && response.data) {
-        setAnalysisData(response.data);
+        const dataWithAge: DataWithAge<SingleAnalysisResponse> = {
+          data: response.data,
+          age: response.lastUpdated ? db.getDataAge(response.lastUpdated) : 'just now',
+          lastUpdated: response.lastUpdated || Date.now(),
+          fromCache: response.fromCache || false
+        };
+        setAnalysisData(dataWithAge);
       } else {
         setError(response.error || 'Failed to fetch analysis');
       }
@@ -71,6 +93,7 @@ export default function SecurityPage() {
       setError(handleApiError(err));
     } finally {
       setAnalysisLoading(false);
+      setAnalysisFetching(false);
     }
   };
 
@@ -78,6 +101,30 @@ export default function SecurityPage() {
     setSelectedExpiry(expiry);
     setAnalysisData(null);
     fetchAnalysis(expiry);
+  };
+
+  const handleFetchContractInfo = () => {
+    setFetching(true);
+    apiClient.getContractInfo(symbol, true)
+      .then(response => {
+        if (response.success && response.data) {
+          const dataWithAge: DataWithAge<ContractInfoResponse> = {
+            data: response.data,
+            age: response.lastUpdated ? db.getDataAge(response.lastUpdated) : 'just now',
+            lastUpdated: response.lastUpdated || Date.now(),
+            fromCache: response.fromCache || false
+          };
+          setContractData(dataWithAge);
+        }
+      })
+      .catch(err => setError(handleApiError(err)))
+      .finally(() => setFetching(false));
+  };
+
+  const handleFetchAnalysis = () => {
+    if (selectedExpiry) {
+      fetchAnalysis(selectedExpiry, true);
+    }
   };
 
   // Helper function to get money status color
@@ -93,13 +140,13 @@ export default function SecurityPage() {
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
           <Loader2 className="w-12 h-12 animate-spin mx-auto text-nse-accent mb-4" />
-          <p className="text-gray-400 text-lg">Loading contract info...</p>
+          <p className="text-gray-400 text-lg">Loading contract info from database...</p>
         </div>
       </div>
     );
   }
 
-  if (error && !contractInfo) {
+  if (error && !contractData) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center max-w-md">
@@ -128,16 +175,54 @@ export default function SecurityPage() {
             <h1 className="text-4xl font-display font-bold text-gradient">
               {symbol}
             </h1>
-            {contractInfo && (
+            {contractData && (
               <span className="px-3 py-1 bg-nse-surface rounded-full text-sm text-gray-300">
-                {contractInfo.expiry_dates.length} Expiries Available
+                {contractData.data.expiry_dates.length} Expiries Available
               </span>
             )}
           </div>
+
+          {/* Contract Info Age and Fetch Controls */}
+          {contractData && (
+            <div className="card-glow rounded-lg p-4 mb-6">
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div className="flex items-center gap-3 text-sm">
+                  <div className="flex items-center gap-2">
+                    {contractData.fromCache ? (
+                      <Database className="w-4 h-4 text-blue-400" />
+                    ) : (
+                      <Clock className="w-4 h-4 text-green-400" />
+                    )}
+                    <span className="text-gray-400">
+                      Contract info {contractData.fromCache ? 'from cache' : 'freshly fetched'}
+                    </span>
+                  </div>
+                  <span className="text-gray-500">•</span>
+                  <div className="flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-gray-500" />
+                    <span className="text-gray-400">Updated {contractData.age}</span>
+                  </div>
+                </div>
+                
+                <button
+                  onClick={handleFetchContractInfo}
+                  disabled={fetching}
+                  className="btn-secondary inline-flex items-center text-sm"
+                >
+                  {fetching ? (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <RefreshCw className="w-4 h-4 mr-2" />
+                  )}
+                  {fetching ? 'Fetching...' : 'Fetch Latest'}
+                </button>
+              </div>
+            </div>
+          )}
         </header>
 
         {/* Expiry Selection */}
-        {contractInfo && (
+        {contractData && (
           <section className="card-glow rounded-lg p-6 mb-8">
             <div className="flex items-center gap-4 mb-4">
               <Calendar className="w-5 h-5 text-nse-accent" />
@@ -145,16 +230,16 @@ export default function SecurityPage() {
             </div>
             
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
-              {contractInfo.expiry_dates.map((expiry) => (
+              {contractData.data.expiry_dates.map((expiry) => (
                 <button
                   key={expiry}
                   onClick={() => handleExpirySelect(expiry)}
-                  disabled={analysisLoading}
+                  disabled={analysisLoading || analysisFetching}
                   className={`p-3 rounded-lg font-medium transition-all ${
                     selectedExpiry === expiry
                       ? 'bg-nse-accent text-white shadow-lg'
                       : 'bg-slate-700 text-gray-300 hover:bg-slate-600'
-                  } ${analysisLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  } ${(analysisLoading || analysisFetching) ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
                   {expiry}
                 </button>
@@ -166,10 +251,50 @@ export default function SecurityPage() {
         {/* Analysis Results */}
         {selectedExpiry && (
           <section className="space-y-6">
-            {analysisLoading ? (
+            {/* Analysis Data Age and Fetch Controls */}
+            {analysisData && (
+              <div className="card-glow rounded-lg p-4">
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+                  <div className="flex items-center gap-3 text-sm">
+                    <div className="flex items-center gap-2">
+                      {analysisData.fromCache ? (
+                        <Database className="w-4 h-4 text-blue-400" />
+                      ) : (
+                        <Clock className="w-4 h-4 text-green-400" />
+                      )}
+                      <span className="text-gray-400">
+                        Analysis {analysisData.fromCache ? 'from cache' : 'freshly fetched'} for {selectedExpiry}
+                      </span>
+                    </div>
+                    <span className="text-gray-500">•</span>
+                    <div className="flex items-center gap-2">
+                      <Clock className="w-4 h-4 text-gray-500" />
+                      <span className="text-gray-400">Updated {analysisData.age}</span>
+                    </div>
+                  </div>
+                  
+                  <button
+                    onClick={handleFetchAnalysis}
+                    disabled={analysisFetching}
+                    className="btn-secondary inline-flex items-center text-sm"
+                  >
+                    {analysisFetching ? (
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                      <RefreshCw className="w-4 h-4 mr-2" />
+                    )}
+                    {analysisFetching ? 'Fetching...' : 'Fetch Latest'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {(analysisLoading || analysisFetching) ? (
               <div className="card-glow rounded-lg p-12 text-center">
                 <Loader2 className="w-8 h-8 animate-spin mx-auto text-nse-accent mb-4" />
-                <p className="text-gray-400">Analyzing {symbol} for {selectedExpiry}...</p>
+                <p className="text-gray-400">
+                  {analysisFetching ? 'Fetching latest analysis' : 'Loading cached analysis'} for {symbol} ({selectedExpiry})...
+                </p>
               </div>
             ) : analysisData ? (
               <>
@@ -181,9 +306,9 @@ export default function SecurityPage() {
                       <span className="text-sm text-gray-400">Underlying Value</span>
                     </div>
                     <p className="text-2xl font-bold text-gray-100">
-                      {formatCurrency(analysisData.underlying_value)}
+                      {formatCurrency(analysisData.data.underlying_value)}
                     </p>
-                    <p className="text-sm text-gray-500 mt-1">as of {analysisData.timestamp}</p>
+                    <p className="text-sm text-gray-500 mt-1">as of {analysisData.data.timestamp}</p>
                   </div>
 
                   <div className="card-glow rounded-lg p-6">
@@ -192,7 +317,7 @@ export default function SecurityPage() {
                       <span className="text-sm text-gray-400">Spread</span>
                     </div>
                     <p className="text-2xl font-bold text-gray-100">
-                      ₹{analysisData.spread.toFixed(2)}
+                      ₹{analysisData.data.spread.toFixed(2)}
                     </p>
                     <p className="text-sm text-gray-500 mt-1">between strikes</p>
                   </div>
@@ -203,7 +328,7 @@ export default function SecurityPage() {
                       <span className="text-sm text-gray-400">Days to Expiry</span>
                     </div>
                     <p className="text-2xl font-bold text-gray-100">
-                      {analysisData.days_to_expiry}
+                      {analysisData.data.days_to_expiry}
                     </p>
                     <p className="text-sm text-gray-500 mt-1">trading days left</p>
                   </div>
@@ -214,26 +339,26 @@ export default function SecurityPage() {
                       <span className="text-sm text-gray-400">Total OI</span>
                     </div>
                     <p className="text-2xl font-bold text-gray-100">
-                      {((analysisData.ce_oi + analysisData.pe_oi) / 10000000).toFixed(1)}Cr
+                      {((analysisData.data.ce_oi + analysisData.data.pe_oi) / 10000000).toFixed(1)}Cr
                     </p>
                     <p className="text-sm text-gray-500 mt-1">
-                      CE: {(analysisData.ce_oi / 10000000).toFixed(1)}Cr | PE: {(analysisData.pe_oi / 10000000).toFixed(1)}Cr
+                      CE: {(analysisData.data.ce_oi / 10000000).toFixed(1)}Cr | PE: {(analysisData.data.pe_oi / 10000000).toFixed(1)}Cr
                     </p>
                   </div>
                 </div>
 
                 {/* Alerts */}
-                {analysisData.alerts && analysisData.alerts.alerts.length > 0 && (
+                {analysisData.data.alerts && analysisData.data.alerts.alerts.length > 0 && (
                   <div className="card-glow rounded-lg p-6">
                     <div className="flex items-center gap-3 mb-4">
                       <AlertCircle className="w-5 h-5 text-nse-warning" />
                       <h2 className="text-xl font-semibold text-gray-100">
-                        Active Alerts ({analysisData.alerts.alerts.length})
+                        Active Alerts ({analysisData.data.alerts.alerts.length})
                       </h2>
                     </div>
                     
                     <div className="space-y-4">
-                      {analysisData.alerts.alerts.map((alert, index) => (
+                      {analysisData.data.alerts.alerts.map((alert, index) => (
                         <div key={index} className="bg-slate-800/50 rounded-lg p-4 border border-gray-700/50">
                           <div className="flex items-start justify-between mb-3">
                             <div className="flex items-center gap-3">
@@ -312,7 +437,7 @@ export default function SecurityPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {analysisData.processed_data.map((option, index) => (
+                        {analysisData.data.processed_data.map((option, index) => (
                           <tr key={index}>
                             <td className="font-bold text-center bg-slate-700/50">
                               ₹{option.strikePrice}
@@ -363,7 +488,7 @@ export default function SecurityPage() {
                 </div>
 
                 {/* No Alerts Message */}
-                {(!analysisData.alerts || analysisData.alerts.alerts.length === 0) && (
+                {(!analysisData.data.alerts || analysisData.data.alerts.alerts.length === 0) && (
                   <div className="card-glow rounded-lg p-8 text-center">
                     <AlertCircle className="w-12 h-12 text-gray-500 mx-auto mb-4" />
                     <h3 className="text-lg font-semibold text-gray-300 mb-2">No Alerts Found</h3>

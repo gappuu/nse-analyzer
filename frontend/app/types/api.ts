@@ -95,4 +95,22 @@ export interface ApiResponse<T> {
   data?: T;
   error?: string;
   processing_time_ms?: number;
+  // Cache-related fields
+  fromCache?: boolean;
+  cachedAt?: string;
+  lastUpdated?: number;
+}
+
+// UI State interfaces for cache management
+export interface DataWithAge<T> {
+  data: T;
+  age: string;
+  lastUpdated: number;
+  fromCache: boolean;
+}
+
+export interface CacheInfo {
+  hasCache: boolean;
+  age?: string;
+  lastUpdated?: number;
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import {
   ArrowLeft,
@@ -10,40 +10,71 @@ import {
   Clock,
   CheckCircle,
   XCircle,
-//   TrendingUp,
   BarChart3,
   Filter,
   Search,
   Download,
+  RefreshCw,
+  Database,
+  Eye
 } from 'lucide-react';
 import { 
   apiClient, 
   handleApiError, 
   getAlertBadgeClass, 
-//   formatLargeNumber,
   formatPercentage 
 } from '@/app/lib/api';
-import { BatchAnalysisResponse, RulesOutput, Alert } from '@/app/types/api';
+import { db } from '@/app/lib/db';
+import { BatchAnalysisResponse, RulesOutput, Alert, DataWithAge } from '@/app/types/api';
 
 export default function BatchAnalysisPage() {
-  const [batchData, setBatchData] = useState<BatchAnalysisResponse | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [batchData, setBatchData] = useState<DataWithAge<BatchAnalysisResponse> | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [newAnalysisLoading, setNewAnalysisLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filterAlertType, setFilterAlertType] = useState<string>('all');
   const [searchSymbol, setSearchSymbol] = useState('');
+  const [hasExistingData, setHasExistingData] = useState(false);
 
-  const runBatchAnalysis = async () => {
+  const checkExistingData = useCallback(async () => {
+    try {
+      setLoading(true);
+      const hasData = await apiClient.hasBatchAnalysis();
+      setHasExistingData(hasData);
+      
+      if (hasData) {
+        // Load existing data
+        loadExistingResults();
+      } else {
+        setLoading(false);
+      }
+    } catch (err) {
+      setError(handleApiError(err));
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    checkExistingData();
+  }, [checkExistingData]);
+
+  const loadExistingResults = async () => {
     try {
       setLoading(true);
       setError(null);
-      setBatchData(null);
       
-      const response = await apiClient.getBatchAnalysis();
+      const response = await apiClient.getBatchAnalysis(false);
       
       if (response.success && response.data) {
-        setBatchData(response.data);
+        const dataWithAge: DataWithAge<BatchAnalysisResponse> = {
+          data: response.data,
+          age: response.lastUpdated ? db.getDataAge(response.lastUpdated) : 'just now',
+          lastUpdated: response.lastUpdated || Date.now(),
+          fromCache: response.fromCache || false
+        };
+        setBatchData(dataWithAge);
       } else {
-        setError(response.error || 'Failed to run batch analysis');
+        setError(response.error || 'Failed to load existing batch analysis');
       }
     } catch (err) {
       setError(handleApiError(err));
@@ -52,10 +83,36 @@ export default function BatchAnalysisPage() {
     }
   };
 
+  const runNewBatchAnalysis = async () => {
+    try {
+      setNewAnalysisLoading(true);
+      setError(null);
+      
+      const response = await apiClient.getBatchAnalysis(true);
+      
+      if (response.success && response.data) {
+        const dataWithAge: DataWithAge<BatchAnalysisResponse> = {
+          data: response.data,
+          age: response.lastUpdated ? db.getDataAge(response.lastUpdated) : 'just now',
+          lastUpdated: response.lastUpdated || Date.now(),
+          fromCache: false
+        };
+        setBatchData(dataWithAge);
+        setHasExistingData(true);
+      } else {
+        setError(response.error || 'Failed to run batch analysis');
+      }
+    } catch (err) {
+      setError(handleApiError(err));
+    } finally {
+      setNewAnalysisLoading(false);
+    }
+  };
+
   const filteredResults = React.useMemo(() => {
     if (!batchData) return [];
 
-    let filtered = batchData.rules_output;
+    let filtered = batchData.data.rules_output;
 
     // Filter by symbol search
     if (searchSymbol) {
@@ -78,7 +135,7 @@ export default function BatchAnalysisPage() {
     if (!batchData) return [];
 
     const types = new Set<string>();
-    batchData.rules_output.forEach(result => {
+    batchData.data.rules_output.forEach(result => {
       result.alerts.forEach(alert => {
         types.add(alert.alert_type);
       });
@@ -90,7 +147,7 @@ export default function BatchAnalysisPage() {
   const downloadResults = () => {
     if (!batchData) return;
 
-    const dataStr = JSON.stringify(batchData, null, 2);
+    const dataStr = JSON.stringify(batchData.data, null, 2);
     const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
     
     const exportFileDefaultName = `nse_batch_analysis_${new Date().toISOString().split('T')[0]}.json`;
@@ -134,63 +191,141 @@ export default function BatchAnalysisPage() {
                   Download Results
                 </button>
               )}
-              
-              <button
-                onClick={runBatchAnalysis}
-                disabled={loading}
-                className="btn-success inline-flex items-center"
-              >
-                {loading ? (
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                ) : (
-                  <Play className="w-4 h-4 mr-2" />
-                )}
-                {loading ? 'Running Analysis...' : 'Run Analysis'}
-              </button>
             </div>
           </div>
         </header>
 
-        {/* Loading State */}
-        {loading && (
+        {/* Loading State for Initial Check */}
+        {loading && !batchData && (
           <div className="card-glow rounded-lg p-12 text-center mb-8">
             <div className="max-w-md mx-auto">
               <Loader2 className="w-16 h-16 animate-spin mx-auto text-nse-accent mb-6" />
               <h3 className="text-xl font-semibold text-gray-100 mb-3">
-                Running Batch Analysis
+                Checking for Existing Data
               </h3>
               <p className="text-gray-400 mb-4">
-                Processing all F&O securities... This may take up to 2 minutes.
+                Looking for cached batch analysis results...
               </p>
-              <div className="bg-slate-800 rounded-lg p-4">
-                <div className="flex items-center justify-between text-sm text-gray-400 mb-2">
-                  <span>Progress</span>
-                  <span>Analyzing securities...</span>
-                </div>
-                <div className="w-full bg-gray-700 rounded-full h-2">
-                  <div className="bg-gradient-to-r from-nse-accent to-emerald-500 h-2 rounded-full animate-pulse-glow" 
-                       style={{ width: '60%' }}></div>
-                </div>
-              </div>
             </div>
           </div>
         )}
 
         {/* Error State */}
-        {error && (
+        {error && !batchData && (
           <div className="card-glow rounded-lg p-8 text-center mb-8 border border-red-900/50">
             <AlertCircle className="w-16 h-16 text-nse-error mx-auto mb-4" />
             <h3 className="text-xl font-semibold text-gray-100 mb-2">Analysis Failed</h3>
             <p className="text-gray-400 mb-6">{error}</p>
-            <button onClick={runBatchAnalysis} className="btn-primary">
+            <button onClick={() => checkExistingData()} className="btn-primary">
               Try Again
             </button>
+          </div>
+        )}
+
+        {/* Action Buttons - Show when not loading initially */}
+        {!loading && (
+          <div className="mb-8">
+            {!batchData && !newAnalysisLoading && (
+              <div className="card-glow rounded-lg p-12 text-center">
+                <BarChart3 className="w-16 h-16 text-nse-accent mx-auto mb-6 glow-effect" />
+                <h3 className="text-2xl font-bold text-gray-100 mb-3">
+                  Batch Analysis Options
+                </h3>
+                <p className="text-gray-400 max-w-2xl mx-auto mb-8">
+                  {hasExistingData 
+                    ? "You can view existing batch results or run a fresh analysis across the entire F&O universe."
+                    : "Run a comprehensive batch analysis to identify unusual options activity, low-price opportunities, and other trading alerts across the entire F&O universe."
+                  }
+                </p>
+                
+                <div className="flex flex-col sm:flex-row gap-4 justify-center">
+                  {hasExistingData && (
+                    <button
+                      onClick={loadExistingResults}
+                      className="btn-secondary inline-flex items-center text-lg px-8 py-4"
+                    >
+                      <Eye className="w-5 h-5 mr-2" />
+                      Show Existing Results
+                    </button>
+                  )}
+                  
+                  <button
+                    onClick={runNewBatchAnalysis}
+                    className="btn-success inline-flex items-center text-lg px-8 py-4"
+                  >
+                    <Play className="w-5 h-5 mr-2" />
+                    Start New Batch Analysis
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* New Analysis Loading State */}
+            {newAnalysisLoading && (
+              <div className="card-glow rounded-lg p-12 text-center mb-8">
+                <div className="max-w-md mx-auto">
+                  <Loader2 className="w-16 h-16 animate-spin mx-auto text-nse-accent mb-6" />
+                  <h3 className="text-xl font-semibold text-gray-100 mb-3">
+                    Running New Batch Analysis
+                  </h3>
+                  <p className="text-gray-400 mb-4">
+                    Processing all F&O securities... This may take up to 2 minutes.
+                  </p>
+                  <div className="bg-slate-800 rounded-lg p-4">
+                    <div className="flex items-center justify-between text-sm text-gray-400 mb-2">
+                      <span>Progress</span>
+                      <span>Analyzing securities...</span>
+                    </div>
+                    <div className="w-full bg-gray-700 rounded-full h-2">
+                      <div className="bg-gradient-to-r from-nse-accent to-emerald-500 h-2 rounded-full animate-pulse-glow" 
+                           style={{ width: '60%' }}></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
         {/* Results */}
         {batchData && (
           <div className="space-y-8">
+            {/* Data Age and Actions */}
+            <div className="card-glow rounded-lg p-4">
+              <div className="flex flex-col lg:flex-row items-center justify-between gap-4">
+                <div className="flex items-center gap-3 text-sm">
+                  <div className="flex items-center gap-2">
+                    {batchData.fromCache ? (
+                      <Database className="w-4 h-4 text-blue-400" />
+                    ) : (
+                      <Clock className="w-4 h-4 text-green-400" />
+                    )}
+                    <span className="text-gray-400">
+                      Analysis {batchData.fromCache ? 'from cache' : 'freshly completed'}
+                    </span>
+                  </div>
+                  <span className="text-gray-500">•</span>
+                  <div className="flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-gray-500" />
+                    <span className="text-gray-400">Updated {batchData.age}</span>
+                  </div>
+                </div>
+                
+                <button
+                  onClick={runNewBatchAnalysis}
+                  disabled={newAnalysisLoading}
+                  className="btn-success inline-flex items-center"
+                >
+                  {newAnalysisLoading ? (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <RefreshCw className="w-4 h-4 mr-2" />
+                  )}
+                  {newAnalysisLoading ? 'Running Analysis...' : 'Start New Analysis'}
+                </button>
+              </div>
+            </div>
+
             {/* Summary Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
               <div className="card-glow rounded-lg p-6">
@@ -199,7 +334,7 @@ export default function BatchAnalysisPage() {
                   <span className="text-sm text-gray-400">Total Securities</span>
                 </div>
                 <p className="text-2xl font-bold text-gray-100">
-                  {batchData.summary.total_securities}
+                  {batchData.data.summary.total_securities}
                 </p>
               </div>
 
@@ -209,7 +344,7 @@ export default function BatchAnalysisPage() {
                   <span className="text-sm text-gray-400">Successful</span>
                 </div>
                 <p className="text-2xl font-bold text-green-400">
-                  {batchData.summary.successful}
+                  {batchData.data.summary.successful}
                 </p>
               </div>
 
@@ -219,7 +354,7 @@ export default function BatchAnalysisPage() {
                   <span className="text-sm text-gray-400">Failed</span>
                 </div>
                 <p className="text-2xl font-bold text-red-400">
-                  {batchData.summary.failed}
+                  {batchData.data.summary.failed}
                 </p>
               </div>
 
@@ -229,7 +364,7 @@ export default function BatchAnalysisPage() {
                   <span className="text-sm text-gray-400">With Alerts</span>
                 </div>
                 <p className="text-2xl font-bold text-yellow-400">
-                  {batchData.summary.securities_with_alerts}
+                  {batchData.data.summary.securities_with_alerts}
                 </p>
               </div>
 
@@ -239,13 +374,13 @@ export default function BatchAnalysisPage() {
                   <span className="text-sm text-gray-400">Processing Time</span>
                 </div>
                 <p className="text-2xl font-bold text-blue-400">
-                  {Math.round(batchData.summary.processing_time_ms / 1000)}s
+                  {Math.round(batchData.data.summary.processing_time_ms / 1000)}s
                 </p>
               </div>
             </div>
 
             {/* Filter Controls */}
-            {batchData.rules_output.length > 0 && (
+            {batchData.data.rules_output.length > 0 && (
               <div className="card-glow rounded-lg p-6">
                 <div className="flex flex-col lg:flex-row gap-4">
                   {/* Search */}
@@ -282,7 +417,7 @@ export default function BatchAnalysisPage() {
                 </div>
 
                 <div className="mt-4 flex items-center gap-2 text-sm text-gray-400">
-                  <span>Showing {filteredResults.length} of {batchData.rules_output.length} securities with alerts</span>
+                  <span>Showing {filteredResults.length} of {batchData.data.rules_output.length} securities with alerts</span>
                 </div>
               </div>
             )}
@@ -294,14 +429,14 @@ export default function BatchAnalysisPage() {
                   <SecurityResultCard key={result.symbol} result={result} />
                 ))}
               </div>
-            ) : batchData.rules_output.length === 0 ? (
+            ) : batchData.data.rules_output.length === 0 ? (
               <div className="card-glow rounded-lg p-12 text-center">
                 <CheckCircle className="w-16 h-16 text-green-500 mx-auto mb-4" />
                 <h3 className="text-xl font-semibold text-gray-100 mb-2">
                   All Clear! 🎉
                 </h3>
                 <p className="text-gray-400 max-w-md mx-auto">
-                  No alerts found across all {batchData.summary.total_securities} securities. 
+                  No alerts found across all {batchData.data.summary.total_securities} securities. 
                   All options are trading within normal parameters.
                 </p>
               </div>
@@ -314,27 +449,6 @@ export default function BatchAnalysisPage() {
                 </p>
               </div>
             )}
-          </div>
-        )}
-
-        {/* Initial State */}
-        {!batchData && !loading && !error && (
-          <div className="card-glow rounded-lg p-12 text-center">
-            <BarChart3 className="w-16 h-16 text-nse-accent mx-auto mb-6 glow-effect" />
-            <h3 className="text-2xl font-bold text-gray-100 mb-3">
-              Ready to Analyze All F&O Securities
-            </h3>
-            <p className="text-gray-400 max-w-2xl mx-auto mb-8">
-              Run a comprehensive batch analysis to identify unusual options activity, 
-              low-price opportunities, and other trading alerts across the entire F&O universe.
-            </p>
-            <button
-              onClick={runBatchAnalysis}
-              className="btn-success inline-flex items-center text-lg px-8 py-4"
-            >
-              <Play className="w-5 h-5 mr-2" />
-              Start Batch Analysis
-            </button>
           </div>
         )}
       </div>

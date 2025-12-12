@@ -3,35 +3,51 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { 
-  // TrendingUp, 
   Search, 
   BarChart3, 
   AlertCircle, 
   Loader2,
   ArrowRight,
-  Target
+  Target,
+  RefreshCw,
+  Clock,
+  Database
 } from 'lucide-react';
 import { apiClient, handleApiError } from '@/app/lib/api';
-import { SecurityInfo, SecurityListResponse } from '@/app/types/api';
+import { db } from '@/app/lib/db';
+import { SecurityInfo, SecurityListResponse, DataWithAge } from '@/app/types/api';
 
 export default function HomePage() {
-  const [securities, setSecurities] = useState<SecurityListResponse | null>(null);
+  const [securitiesData, setSecuritiesData] = useState<DataWithAge<SecurityListResponse> | null>(null);
   const [loading, setLoading] = useState(true);
+  const [fetching, setFetching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedLetter, setSelectedLetter] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchSecurities();
+    loadSecurities();
   }, []);
 
-  const fetchSecurities = async () => {
+  const loadSecurities = async (forceRefresh = false) => {
     try {
-      setLoading(true);
-      const response = await apiClient.getSecurities();
+      if (forceRefresh) {
+        setFetching(true);
+      } else {
+        setLoading(true);
+      }
+      setError(null);
+      
+      const response = await apiClient.getSecurities(forceRefresh);
       
       if (response.success && response.data) {
-        setSecurities(response.data);
+        const dataWithAge: DataWithAge<SecurityListResponse> = {
+          data: response.data,
+          age: response.lastUpdated ? db.getDataAge(response.lastUpdated) : 'just now',
+          lastUpdated: response.lastUpdated || Date.now(),
+          fromCache: response.fromCache || false
+        };
+        setSecuritiesData(dataWithAge);
       } else {
         setError(response.error || 'Failed to fetch securities');
       }
@@ -39,24 +55,29 @@ export default function HomePage() {
       setError(handleApiError(err));
     } finally {
       setLoading(false);
+      setFetching(false);
     }
   };
 
+  const handleFetchLatest = () => {
+    loadSecurities(true);
+  };
+
   const filteredSecurities = React.useMemo(() => {
-    if (!securities) return null;
+    if (!securitiesData) return null;
 
     let filtered: SecurityInfo[] = [];
 
     // Add indices first
-    filtered = [...securities.indices];
+    filtered = [...securitiesData.data.indices];
 
     // Add filtered equities
     if (selectedLetter) {
-      const letterSecurities = securities.equities[selectedLetter] || [];
+      const letterSecurities = securitiesData.data.equities[selectedLetter] || [];
       filtered = [...filtered, ...letterSecurities];
     } else {
       // Add all equities if no letter selected
-      Object.values(securities.equities).forEach(letterGroup => {
+      Object.values(securitiesData.data.equities).forEach(letterGroup => {
         filtered = [...filtered, ...letterGroup];
       });
     }
@@ -69,22 +90,22 @@ export default function HomePage() {
     }
 
     return filtered;
-  }, [securities, searchTerm, selectedLetter]);
+  }, [securitiesData, searchTerm, selectedLetter]);
 
-  const availableLetters = securities ? Object.keys(securities.equities).sort() : [];
+  const availableLetters = securitiesData ? Object.keys(securitiesData.data.equities).sort() : [];
 
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
           <Loader2 className="w-12 h-12 animate-spin mx-auto text-nse-accent mb-4" />
-          <p className="text-gray-400 text-lg">Loading securities...</p>
+          <p className="text-gray-400 text-lg">Loading securities from database...</p>
         </div>
       </div>
     );
   }
 
-  if (error) {
+  if (error && !securitiesData) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center max-w-md">
@@ -92,7 +113,7 @@ export default function HomePage() {
           <h1 className="text-2xl font-bold text-gray-100 mb-2">Error Loading Data</h1>
           <p className="text-gray-400 mb-6">{error}</p>
           <button 
-            onClick={fetchSecurities}
+            onClick={() => loadSecurities(true)}
             className="btn-primary"
           >
             Try Again
@@ -118,6 +139,44 @@ export default function HomePage() {
               intelligent alerts, and comprehensive market insights.
             </p>
           </div>
+
+          {/* Data Age and Fetch Controls */}
+          {securitiesData && (
+            <div className="card-glow rounded-lg p-4 mb-6">
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div className="flex items-center gap-3 text-sm">
+                  <div className="flex items-center gap-2">
+                    {securitiesData.fromCache ? (
+                      <Database className="w-4 h-4 text-blue-400" />
+                    ) : (
+                      <Clock className="w-4 h-4 text-green-400" />
+                    )}
+                    <span className="text-gray-400">
+                      Data {securitiesData.fromCache ? 'from cache' : 'freshly fetched'}
+                    </span>
+                  </div>
+                  <span className="text-gray-500">•</span>
+                  <div className="flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-gray-500" />
+                    <span className="text-gray-400">Updated {securitiesData.age}</span>
+                  </div>
+                </div>
+                
+                <button
+                  onClick={handleFetchLatest}
+                  disabled={fetching}
+                  className="btn-secondary inline-flex items-center text-sm"
+                >
+                  {fetching ? (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <RefreshCw className="w-4 h-4 mr-2" />
+                  )}
+                  {fetching ? 'Fetching...' : 'Fetch Latest'}
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Action Buttons */}
           <div className="flex flex-col sm:flex-row gap-4 justify-center items-center mb-8">
@@ -183,8 +242,8 @@ export default function HomePage() {
           {/* Securities Grid */}
           {filteredSecurities && (
             <div className="space-y-8">
-              {securities?.indices && securities.indices.length > 0 && (
-                selectedLetter === null || securities.indices.some(s => 
+              {securitiesData?.data.indices && securitiesData.data.indices.length > 0 && (
+                selectedLetter === null || securitiesData.data.indices.some(s => 
                   s.symbol.toLowerCase().includes(searchTerm.toLowerCase())
                 )
               ) && (
@@ -194,7 +253,7 @@ export default function HomePage() {
                     Indices
                   </h2>
                   <div className="security-grid">
-                    {securities.indices
+                    {securitiesData.data.indices
                       .filter(security => 
                         searchTerm === '' || 
                         security.symbol.toLowerCase().includes(searchTerm.toLowerCase())
@@ -217,7 +276,7 @@ export default function HomePage() {
                     Securities - {selectedLetter}
                   </h2>
                   <div className="security-grid">
-                    {(securities?.equities[selectedLetter] || [])
+                    {(securitiesData?.data.equities[selectedLetter] || [])
                       .filter(security => 
                         searchTerm === '' || 
                         security.symbol.toLowerCase().includes(searchTerm.toLowerCase())
@@ -237,7 +296,7 @@ export default function HomePage() {
                     All Equities
                   </h2>
                   <div className="security-grid">
-                    {Object.entries(securities?.equities || {})
+                    {Object.entries(securitiesData?.data.equities || {})
                       .flatMap(([letter, letterSecurities]) => letterSecurities)
                       .filter(security => 
                         searchTerm === '' || 
