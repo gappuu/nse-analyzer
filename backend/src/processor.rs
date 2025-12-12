@@ -248,15 +248,15 @@ fn classify_money_with_distance(
 /// Calculate Tambu classification
 fn calculate_tambu(detail: &OptionDetail) -> Option<String> {
     let pchange_in_oi = detail.per_chg_oi.unwrap_or(0.0);
-    let pchange = detail.per_chg_oi.unwrap_or(0.0);
+    let pchange = detail.per_chg_price.unwrap_or(0.0);
     
-    // TMJ: pchangeinOpenInterest > 10% AND pchange > -15%
-    if pchange_in_oi > 10.0 && pchange > -15.0 {
+    // TMJ: pchangeinOpenInterest > 30% AND pchange < -15%
+    if pchange_in_oi > 30.0 && pchange < -15.0 {
         return Some("TMJ".to_string());
     }
     
-    // TMG: pchangeinOpenInterest < -11% AND pchange > 16%
-    if pchange_in_oi < -11.0 && pchange > 16.0 {
+    // TMG: pchangeinOpenInterest < -10% AND pchange > 16%
+    if pchange_in_oi < -10.0 && pchange > 16.0 {
         return Some("TMG".to_string());
     }
     
