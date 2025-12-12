@@ -8,8 +8,19 @@
   --nse-secondary: #3B82F6;
   --nse-accent: #10B981;
   --nse-surface: #334155;
+  --nse-error: #f87171;
+  --nse-warning: #facc15;
   --font-family-body: 'Inter', Arial, Helvetica, sans-serif;
   --font-family-mono: 'JetBrains Mono', monospace;
+  
+  /* Color Palette */
+  --color-green-400: #4ade80;
+  --color-red-400: #f87171;
+  --color-yellow-400: #facc15;
+  --color-gray-300: #d1d5db;
+  --color-gray-400: #9ca3af;
+  --color-gray-500: #6b7280;
+  --color-blue-400: #60a5fa;
 }
 
 body {
@@ -20,6 +31,99 @@ body {
 
 * {
   border-color: #374151;
+}
+
+/* Color Utility Classes */
+.text-green-400 {
+  color: #4ade80 !important;
+}
+
+.text-red-400 {
+  color: #f87171 !important;
+}
+
+.text-yellow-400 {
+  color: #facc15 !important;
+}
+
+.text-gray-300 {
+  color: #d1d5db !important;
+}
+
+.text-gray-400 {
+  color: #9ca3af !important;
+}
+
+.text-gray-500 {
+  color: #6b7280 !important;
+}
+
+.text-blue-400 {
+  color: #60a5fa !important;
+}
+
+/* Money Status Colors */
+.money-atm {
+  color: #facc15 !important;
+}
+
+.money-itm {
+  color: #d8f5e3 !important;
+}
+
+.money-otm {
+  color: #f7cdcd !important;
+}
+
+/* Percentage Change Colors */
+.pchange-positive {
+  color: #4ade80 !important;
+}
+
+.pchange-negative {
+  color: #f87171 !important;
+}
+
+.pchange-neutral {
+  color: #9ca3af !important;
+}
+
+/* Option Type Colors */
+.option-ce {
+  color: #4ade80 !important;
+}
+
+.option-pe {
+  color: #f87171 !important;
+}
+
+/* Data table specific overrides */
+.data-table td.money-atm {
+  color: #facc15 !important;
+}
+
+.data-table td.money-itm {
+  color: #ffffff !important;
+}
+
+.data-table td.money-otm {
+  color: #ffffff !important;
+}
+
+.data-table td.pchange-positive {
+  color: #4ade80 !important;
+}
+
+.data-table td.pchange-negative {
+  color: #f87171 !important;
+}
+
+.data-table td.option-ce {
+  color: #ffffff !important;
+}
+
+.data-table td.option-pe {
+  color: #ffffff !important;
 }
 
 /* Custom Components */
@@ -48,6 +152,28 @@ body {
 }
 
 .btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: scale(1);
+}
+
+.btn-secondary {
+  background: linear-gradient(to right, var(--nse-surface), #475569);
+  color: white;
+  font-weight: 500;
+  padding: 12px 24px;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.btn-secondary:hover {
+  background: linear-gradient(to right, #475569, var(--nse-surface));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  transform: scale(1.05);
+}
+
+.btn-secondary:disabled {
   opacity: 0.5;
   cursor: not-allowed;
   transform: scale(1);
@@ -200,6 +326,10 @@ body {
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   color: transparent;
+}
+
+.bg-nse-accent{
+  background-color: var(--nse-accent) !important;
 }
 
 .glow-effect {

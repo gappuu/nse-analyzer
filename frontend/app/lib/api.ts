@@ -239,10 +239,16 @@ export const getOptionTypeColor = (optionType: string): string => {
   return optionType === 'CE' ? 'text-green-400' : 'text-red-400';
 };
 
-// Get money status color
+// Get money status color class
 export const getMoneyStatusColor = (theMoneyStatus: string): string => {
-  if (theMoneyStatus === 'ATM') return 'text-yellow-400';
-  if (theMoneyStatus.includes('ITM')) return 'text-green-400';
-  if (theMoneyStatus.includes('OTM')) return 'text-red-400';
+  if (theMoneyStatus === 'ATM') return 'money-atm';
+  if (theMoneyStatus.includes('ITM')) return 'money-itm';
+  if (theMoneyStatus.includes('OTM')) return 'money-otm';
   return 'text-gray-400';
+};
+
+// Get percentage change color class
+export const getPChangeColorClass = (value: number | undefined): string => {
+  if (value === undefined || value === null) return 'pchange-neutral';
+  return value > 0 ? 'pchange-positive' : value < 0 ? 'pchange-negative' : 'pchange-neutral';
 };

@@ -15,7 +15,7 @@ import {
   RefreshCw,
   Database
 } from 'lucide-react';
-import { apiClient, handleApiError, getAlertBadgeClass, formatCurrency } from '@/app/lib/api';
+import { apiClient, handleApiError, getAlertBadgeClass, formatCurrency, getMoneyStatusColor } from '@/app/lib/api';
 import { db } from '@/app/lib/db';
 import { ContractInfoResponse, SingleAnalysisResponse, DataWithAge } from '@/app/types/api';
 
@@ -125,14 +125,6 @@ export default function SecurityPage() {
     if (selectedExpiry) {
       fetchAnalysis(selectedExpiry, true);
     }
-  };
-
-  // Helper function to get money status color
-  const getMoneyStatusColor = (theMoneyStatus: string): string => {
-    if (theMoneyStatus === 'ATM') return 'text-yellow-400';
-    if (theMoneyStatus.includes('ITM')) return 'text-green-400';
-    if (theMoneyStatus.includes('OTM')) return 'text-red-400';
-    return 'text-gray-400';
   };
 
   if (loading) {
@@ -317,7 +309,7 @@ export default function SecurityPage() {
                       <span className="text-sm text-gray-400">Spread</span>
                     </div>
                     <p className="text-2xl font-bold text-gray-100">
-                      ₹{analysisData.data.spread.toFixed(2)}
+                      {analysisData.data.spread.toFixed(2)}
                     </p>
                     <p className="text-sm text-gray-500 mt-1">between strikes</p>
                   </div>
@@ -338,12 +330,18 @@ export default function SecurityPage() {
                       <TrendingUp className="w-5 h-5 text-nse-accent" />
                       <span className="text-sm text-gray-400">Total OI</span>
                     </div>
+                    {/* <p className="text-2xl font-bold text-gray-100">
+                      {((analysisData.data.ce_oi + analysisData.data.pe_oi) ).toFixed(0)}
+                    </p> */}
                     <p className="text-2xl font-bold text-gray-100">
-                      {((analysisData.data.ce_oi + analysisData.data.pe_oi) / 10000000).toFixed(1)}Cr
+                      CE : {(analysisData.data.ce_oi ).toFixed(0)}
                     </p>
-                    <p className="text-sm text-gray-500 mt-1">
-                      CE: {(analysisData.data.ce_oi / 10000000).toFixed(1)}Cr | PE: {(analysisData.data.pe_oi / 10000000).toFixed(1)}Cr
+                    <p className="text-2xl font-bold text-gray-100">
+                      PE : {(analysisData.data.pe_oi ).toFixed(0)}
                     </p>
+                    {/* <p className="text-sm text-gray-500 mt-1">
+                      CE: {(analysisData.data.ce_oi ).toFixed(0)} | PE: {(analysisData.data.pe_oi ).toFixed(0)}
+                    </p> */}
                   </div>
                 </div>
 
@@ -353,7 +351,7 @@ export default function SecurityPage() {
                     <div className="flex items-center gap-3 mb-4">
                       <AlertCircle className="w-5 h-5 text-nse-warning" />
                       <h2 className="text-xl font-semibold text-gray-100">
-                        Active Alerts ({analysisData.data.alerts.alerts.length})
+                        Active Alerts ({analysisData.data.alerts.alerts.length}) 
                       </h2>
                     </div>
                     
@@ -371,7 +369,10 @@ export default function SecurityPage() {
                                 {alert.option_type}
                               </span>
                               <span className="text-gray-400">
-                                Strike: ₹{alert.strike_price}
+                                Strike: ₹{alert.strike_price} 
+                              </span>
+                              <span >
+                                Expiry : {alert.expiry_date}
                               </span>
                             </div>
                           </div>
@@ -413,9 +414,12 @@ export default function SecurityPage() {
                 {/* Options Chain Table */}
                 <div className="card-glow rounded-lg overflow-hidden">
                   <div className="p-6 border-b border-gray-700/50">
-                    <h2 className="text-xl font-semibold text-gray-100">Options Chain Data</h2>
+                  
+                    <h2 className="text-xl font-semibold text-gray-100"> {symbol} - {analysisData.data.underlying_value} </h2>
                     <p className="text-gray-400 text-sm mt-1">
-                      Showing filtered strikes around ATM with high OI outliers
+                     As of [{analysisData.data.timestamp}] {selectedExpiry} || 
+                      || 
+                     CE: {analysisData.data.ce_oi} PE: {analysisData.data.pe_oi}
                     </p>
                   </div>
                   
@@ -444,23 +448,23 @@ export default function SecurityPage() {
                           .map((option, index) => (
                           <tr key={index}>
                             {/* CE Data */}
-                            <td>
+                            <td className={option.CE?.openInterest ? '' : 'text-gray-400'}>
                               {Number(option.CE?.openInterest) || '-'}
                             </td>
                             <td className={option.CE?.pchangeinOpenInterest ? 
-                              (option.CE.pchangeinOpenInterest > 0 ? 'text-green-400' : 'text-red-400') : ''}>
+                              (option.CE.pchangeinOpenInterest > 0 ? 'pchange-positive' : 'pchange-negative') : 'pchange-neutral'}>
                               {option.CE?.pchangeinOpenInterest ? 
-                                `${option.CE.pchangeinOpenInterest > 0 ? '+' : ''}${option.CE.pchangeinOpenInterest.toFixed(1)}%` : '-'}
+                                `${option.CE.pchangeinOpenInterest > 0 ? '+' : ''}${option.CE.pchangeinOpenInterest.toFixed(1)}%` : '0'}
                             </td>
-                            <td className={option.CE ? getMoneyStatusColor(option.CE.the_money) : ''}>
+                            <td className={option.CE ? getMoneyStatusColor(option.CE.the_money) : 'text-gray-400'}>
                               {option.CE?.the_money || '-'}
                             </td>
                             <td className={option.CE?.pchange ? 
-                              (option.CE.pchange > 0 ? 'text-green-400' : 'text-red-400') : ''}>
+                              (option.CE.pchange > 0 ? 'pchange-positive' : 'pchange-negative') : 'pchange-neutral'}>
                               {option.CE?.pchange ? 
                                 `${option.CE.pchange > 0 ? '+' : ''}${option.CE.pchange.toFixed(1)}%` : '-'}
                             </td>
-                            <td className="text-green-400">
+                            <td className="option-ce">
                               {option.CE?.lastPrice ? `₹${option.CE.lastPrice.toFixed(2)}` : '-'}
                             </td>
                             <td className="text-gray-300">
@@ -468,7 +472,7 @@ export default function SecurityPage() {
                             </td>
                             
                             {/* Strike Price */}
-                            <td className="font-bold text-center bg-slate-700/50">
+                            <td className={`font-bold text-center ${ option.CE ? getMoneyStatusColor(option.CE.the_money) : ""}`} style={{ backgroundColor: "rgba(51, 65, 85, 0.5)" }}> 
                               {option.strikePrice}
                             </td>
                             
@@ -476,25 +480,23 @@ export default function SecurityPage() {
                             <td className="text-gray-300">
                               {option.PE?.tambu || '-'}
                             </td>
-                            <td className="text-red-400">
+                            <td className="option-pe">
                               {option.PE?.lastPrice ? `₹${option.PE.lastPrice.toFixed(2)}` : '-'}
                             </td>
                             <td className={option.PE?.pchange ? 
-                              (option.PE.pchange > 0 ? 'text-green-400' : 'text-red-400') : ''}>
+                              (option.PE.pchange > 0 ? 'pchange-positive' : 'pchange-negative') : 'pchange-neutral'}>
                               {option.PE?.pchange ? 
                                 `${option.PE.pchange > 0 ? '+' : ''}${option.PE.pchange.toFixed(1)}%` : '-'}
                             </td>
-                            <td className={option.PE ? getMoneyStatusColor(option.PE.the_money) : ''}>
+                            <td className={option.PE ? getMoneyStatusColor(option.PE.the_money) : 'text-gray-400'}>
                               {option.PE?.the_money || '-'}
                             </td>
                             <td className={option.PE?.pchangeinOpenInterest ? 
-                              (option.PE.pchangeinOpenInterest > 0 ? 'text-green-400' : 'text-red-400') : ''}>
+                              (option.PE.pchangeinOpenInterest > 0 ? 'pchange-positive' : 'pchange-negative') : 'pchange-neutral'}>
                               {option.PE?.pchangeinOpenInterest ? 
-                                `${option.PE.pchangeinOpenInterest > 0 ? '+' : ''}${option.PE.pchangeinOpenInterest.toFixed(1)}%` : '-'}
+                                `${option.PE.pchangeinOpenInterest > 0 ? '+' : ''}${option.PE.pchangeinOpenInterest.toFixed(1)}%` : '0'}
                             </td>
-                            <td>
-                              {/* {option.PE?.openInterest ? 
-                                (option.PE.openInterest / 100000).toFixed(1) + 'L' : '-'} */}
+                            <td className={option.PE?.openInterest ? '' : 'text-gray-400'}>
                               {Number(option.PE?.openInterest) || '-'}
                             </td>
                           </tr>
@@ -513,7 +515,7 @@ export default function SecurityPage() {
                       All options for {symbol} ({selectedExpiry}) are within normal parameters
                     </p>
                   </div>
-                )}
+                )}  
               </>
             ) : null}
           </section>
