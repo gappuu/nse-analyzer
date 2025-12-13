@@ -41,9 +41,19 @@ export default function SecurityPage() {
     return () => clearInterval(interval);
   }, []);
 
-  // Function to calculate real-time age
+  // Function to calculate real-time age from lastUpdated timestamp
   const getRealTimeAge = (lastUpdated: number) => {
     return db.getDataAge(lastUpdated, currentTime);
+  };
+
+  // Function to calculate real-time age from data timestamp string
+  const getDataTimestampAge = (timestampString: string) => {
+    try {
+      const dataTime = new Date(timestampString).getTime();
+      return db.getDataAge(dataTime, currentTime);
+    } catch (error) {
+      return 'unknown';
+    }
   };
 
   // Function to get OI rank styling
@@ -464,7 +474,7 @@ export default function SecurityPage() {
                               {analysisData.data.timestamp}
                             </div>
                               <div className="text-sm text-gray-400">
-                                {getRealTimeAge(analysisData.lastUpdated)}
+                                Data Age : {getDataTimestampAge(analysisData.data.timestamp)}
                               </div>
                           </td>
                           <td className="px-6 py-4 text-center">
@@ -609,7 +619,7 @@ export default function SecurityPage() {
                                 </td>
                                 <td className={`${option.PE?.openInterest ? peOIRank.className : 'text-gray-400'}`}>
                                   <div>
-                                    {Number(option.PE?.openInterest) || '-'} 
+                                    {Number(option.PE?.openInterest) || '-'}
                                     {peOIRank.showRank && (
                                       <sup className="ml-1 text-xs">
                                         {option.PE?.oiRank}
