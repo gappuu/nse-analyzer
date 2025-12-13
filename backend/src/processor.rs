@@ -56,11 +56,56 @@ fn calculate_days_to_expiry(expiry_date_str: &str) -> Result<i32> {
     Ok(days_diff)
 }
 
+/// Calculate OI rankings for CE and PE options separately
+fn calculate_oi_rankings(data: &mut [OptionData]) {
+    // Collect all CE options with their indices for ranking
+    let mut ce_options: Vec<(usize, f64)> = Vec::new();
+    let mut pe_options: Vec<(usize, f64)> = Vec::new();
+    
+    // Gather CE and PE options with valid OI
+    for (i, opt) in data.iter().enumerate() {
+        if let Some(ref call) = opt.call {
+            if let Some(oi) = call.open_interest {
+                ce_options.push((i, oi));
+            }
+        }
+        
+        if let Some(ref put) = opt.put {
+            if let Some(oi) = put.open_interest {
+                pe_options.push((i, oi));
+            }
+        }
+    }
+    
+    // Sort CE options by OI in descending order (highest first)
+    ce_options.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    
+    // Sort PE options by OI in descending order (highest first)
+    pe_options.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    
+    // Assign ranks to CE options
+    for (rank, &(data_index, _)) in ce_options.iter().enumerate() {
+        if let Some(ref mut call) = data[data_index].call {
+            call.oi_rank = Some((rank + 1) as u32);
+        }
+    }
+    
+    // Assign ranks to PE options
+    for (rank, &(data_index, _)) in pe_options.iter().enumerate() {
+        if let Some(ref mut put) = data[data_index].put {
+            put.oi_rank = Some((rank + 1) as u32);
+        }
+    }
+}
+
 /// Process option chain data
 pub fn process_option_data(
-    data: Vec<OptionData>,
+    mut data: Vec<OptionData>,
     underlying_value: f64,
 ) -> (Vec<ProcessedOptionData>, f64) {
+    // Step 0: Calculate OI rankings for CE and PE separately
+    calculate_oi_rankings(&mut data);
+    
     // Step 1: Identify ATM strike
     let atm_strike = find_atm_strike(&data, underlying_value);
     
@@ -472,6 +517,7 @@ mod tests {
             last_price: Some(12.0),
             price_change: Some(1.0),
             per_chg_price: Some(5.0),
+            oi_rank: None,
         };
         
         // CE: underlying (110) > strike (100), so time_val = 12 - (110-100) = 2
@@ -493,6 +539,7 @@ mod tests {
             last_price: Some(6.0),
             price_change: Some(1.0),
             per_chg_price: Some(5.0),
+            oi_rank: None,
         };
         
         // CE: underlying (110) > strike (100), so time_val = 6 - (110-100) = -4
@@ -500,5 +547,134 @@ mod tests {
         
         // PE: strike (100) < underlying (110), so time_val = 6
         assert_eq!(calculate_time_value(&detail, 100.0, 110.0, false), 6.0);
+    }
+
+    #[test]
+    fn test_oi_ranking() {
+        // Create test data with different OI values
+        let mut data = vec![
+            OptionData {
+                expiry_date: Some("30-Dec-2025".to_string()),
+                strike_price: Some(100.0),
+                call: Some(OptionDetail {
+                    strike_price: Some(100.0),
+                    underlying_value: Some(105.0),
+                    open_interest: Some(1000.0), // Should get rank 2 for CE
+                    change_in_oi: Some(0.0),
+                    per_chg_oi: Some(0.0),
+                    last_price: Some(5.0),
+                    price_change: Some(0.0),
+                    per_chg_price: Some(0.0),
+                    oi_rank: None,
+                }),
+                put: Some(OptionDetail {
+                    strike_price: Some(100.0),
+                    underlying_value: Some(105.0),
+                    open_interest: Some(2000.0), // Should get rank 1 for PE
+                    change_in_oi: Some(0.0),
+                    per_chg_oi: Some(0.0),
+                    last_price: Some(3.0),
+                    price_change: Some(0.0),
+                    per_chg_price: Some(0.0),
+                    oi_rank: None,
+                }),
+            },
+            OptionData {
+                expiry_date: Some("30-Dec-2025".to_string()),
+                strike_price: Some(105.0),
+                call: Some(OptionDetail {
+                    strike_price: Some(105.0),
+                    underlying_value: Some(105.0),
+                    open_interest: Some(1500.0), // Should get rank 1 for CE
+                    change_in_oi: Some(0.0),
+                    per_chg_oi: Some(0.0),
+                    last_price: Some(2.5),
+                    price_change: Some(0.0),
+                    per_chg_price: Some(0.0),
+                    oi_rank: None,
+                }),
+                put: Some(OptionDetail {
+                    strike_price: Some(105.0),
+                    underlying_value: Some(105.0),
+                    open_interest: Some(800.0), // Should get rank 2 for PE
+                    change_in_oi: Some(0.0),
+                    per_chg_oi: Some(0.0),
+                    last_price: Some(2.5),
+                    price_change: Some(0.0),
+                    per_chg_price: Some(0.0),
+                    oi_rank: None,
+                }),
+            },
+        ];
+
+        // Apply OI ranking
+        calculate_oi_rankings(&mut data);
+
+        // Check CE rankings: 105 strike (1500 OI) should be rank 1, 100 strike (1000 OI) should be rank 2
+        assert_eq!(data[0].call.as_ref().unwrap().oi_rank, Some(2));
+        assert_eq!(data[1].call.as_ref().unwrap().oi_rank, Some(1));
+
+        // Check PE rankings: 100 strike (2000 OI) should be rank 1, 105 strike (800 OI) should be rank 2
+        assert_eq!(data[0].put.as_ref().unwrap().oi_rank, Some(1));
+        assert_eq!(data[1].put.as_ref().unwrap().oi_rank, Some(2));
+    }
+
+    #[test]
+    fn test_oi_ranking_with_null_values() {
+        // Test with some None values for open_interest
+        let mut data = vec![
+            OptionData {
+                expiry_date: Some("30-Dec-2025".to_string()),
+                strike_price: Some(100.0),
+                call: Some(OptionDetail {
+                    strike_price: Some(100.0),
+                    underlying_value: Some(105.0),
+                    open_interest: None, // Should not get a rank
+                    change_in_oi: Some(0.0),
+                    per_chg_oi: Some(0.0),
+                    last_price: Some(5.0),
+                    price_change: Some(0.0),
+                    per_chg_price: Some(0.0),
+                    oi_rank: None,
+                }),
+                put: Some(OptionDetail {
+                    strike_price: Some(100.0),
+                    underlying_value: Some(105.0),
+                    open_interest: Some(1000.0), // Should get rank 1
+                    change_in_oi: Some(0.0),
+                    per_chg_oi: Some(0.0),
+                    last_price: Some(3.0),
+                    price_change: Some(0.0),
+                    per_chg_price: Some(0.0),
+                    oi_rank: None,
+                }),
+            },
+            OptionData {
+                expiry_date: Some("30-Dec-2025".to_string()),
+                strike_price: Some(105.0),
+                call: Some(OptionDetail {
+                    strike_price: Some(105.0),
+                    underlying_value: Some(105.0),
+                    open_interest: Some(500.0), // Should get rank 1
+                    change_in_oi: Some(0.0),
+                    per_chg_oi: Some(0.0),
+                    last_price: Some(2.5),
+                    price_change: Some(0.0),
+                    per_chg_price: Some(0.0),
+                    oi_rank: None,
+                }),
+                put: None, // No PE option
+            },
+        ];
+
+        // Apply OI ranking
+        calculate_oi_rankings(&mut data);
+
+        // Check that null OI doesn't get ranked
+        assert_eq!(data[0].call.as_ref().unwrap().oi_rank, None);
+        
+        // Check that valid OI gets rank 1
+        assert_eq!(data[1].call.as_ref().unwrap().oi_rank, Some(1));
+        assert_eq!(data[0].put.as_ref().unwrap().oi_rank, Some(1));
     }
 }

@@ -119,4 +119,7 @@ pub struct OptionDetail {
 
      #[serde(rename = "pchangeinOpenInterest")]
     pub per_chg_oi: Option<f64>,
+
+     #[serde(rename = "oiRank")]
+    pub oi_rank: Option<u32>,
 }
