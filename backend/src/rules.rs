@@ -256,6 +256,7 @@ mod tests {
                 last_price: Some(5.0),
                 price_change: Some(1.0),
                 per_chg_price: Some(20.0),
+                oi_rank:Some(1)
             },
             the_money: "OTM".to_string(),
             tambu: None,
@@ -283,6 +284,7 @@ mod tests {
                 last_price: Some(5.0),
                 price_change: Some(-1.0),
                 per_chg_price: Some(-20.0),
+                oi_rank:Some(10),
             },
             the_money: "OTM".to_string(),
             tambu: None,
@@ -310,6 +312,7 @@ mod tests {
                 last_price: Some(1.5),  // Low price
                 price_change: Some(0.5),
                 per_chg_price: Some(50.0),
+                oi_rank:Some(5),
             },
             the_money: "OTM".to_string(),
             tambu: None,
@@ -337,6 +340,7 @@ mod tests {
                 last_price: Some(1.0),  // Low price
                 price_change: Some(0.5),
                 per_chg_price: Some(50.0),
+                oi_rank:Some(2),
             },
             the_money: "OTM".to_string(),
             tambu: None,
