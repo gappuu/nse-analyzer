@@ -10,7 +10,6 @@ import {
   AlertCircle,
   Loader2,
   Clock,
-  DollarSign,
   BarChart3,
   RefreshCw,
   Database
@@ -206,7 +205,7 @@ export default function SecurityPage() {
                   ) : (
                     <RefreshCw className="w-4 h-4 mr-2" />
                   )}
-                  {fetching ? 'Fetching...' : 'Fetch Latest'}
+                  {fetching ? 'Fetching...' : 'Fetch Expiry'}
                 </button>
               </div>
             </div>
@@ -275,7 +274,7 @@ export default function SecurityPage() {
                     ) : (
                       <RefreshCw className="w-4 h-4 mr-2" />
                     )}
-                    {analysisFetching ? 'Fetching...' : 'Fetch Latest'}
+                    {analysisFetching ? 'Fetching...' : 'Fetch Data'}
                   </button>
                 </div>
               </div>
@@ -294,7 +293,7 @@ export default function SecurityPage() {
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                   <div className="card-glow rounded-lg p-6">
                     <div className="flex items-center gap-3 mb-2">
-                      <DollarSign className="w-5 h-5 text-nse-accent" />
+                      {/* <DollarSign className="w-5 h-5 text-nse-accent" /> */}
                       <span className="text-sm text-gray-400">Underlying Value</span>
                     </div>
                     <p className="text-2xl font-bold text-gray-100">
@@ -334,14 +333,11 @@ export default function SecurityPage() {
                       {((analysisData.data.ce_oi + analysisData.data.pe_oi) ).toFixed(0)}
                     </p> */}
                     <p className="text-2xl font-bold text-gray-100">
-                      CE : {(analysisData.data.ce_oi ).toFixed(0)}
+                      CE : {Number(analysisData.data.ce_oi).toLocaleString("en-IN", {maximumFractionDigits: 0,})}
                     </p>
                     <p className="text-2xl font-bold text-gray-100">
-                      PE : {(analysisData.data.pe_oi ).toFixed(0)}
+                      PE : {Number(analysisData.data.pe_oi).toLocaleString("en-IN", {maximumFractionDigits: 0,})}
                     </p>
-                    {/* <p className="text-sm text-gray-500 mt-1">
-                      CE: {(analysisData.data.ce_oi ).toFixed(0)} | PE: {(analysisData.data.pe_oi ).toFixed(0)}
-                    </p> */}
                   </div>
                 </div>
 
@@ -411,18 +407,85 @@ export default function SecurityPage() {
                   </div>
                 )}
 
-                {/* Options Chain Table */}
-                <div className="card-glow rounded-lg overflow-hidden">
-                  <div className="p-6 border-b border-gray-700/50">
-                  
-                    <h2 className="text-xl font-semibold text-gray-100"> {symbol} - {analysisData.data.underlying_value} </h2>
-                    <p className="text-gray-400 text-sm mt-1">
-                     As of [{analysisData.data.timestamp}] {selectedExpiry} || 
-                      || 
-                     CE: {analysisData.data.ce_oi} PE: {analysisData.data.pe_oi}
-                    </p>
+                {/* Summary Table - Separate from Options Chain */}
+                <div className="card-glow rounded-t-lg overflow-hidden" style={{marginBottom:0}} >
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <tbody>
+                        {/* Row 1: Symbol, Underlying Value, Timestamp, Fetch Timestamp */}
+                        <tr className="border-b border-gray-700/50">
+                          <td className="px-6 py-4 font-bold text-xl ">
+                            <div className=" text-gradient">
+                              {symbol} 
+                            </div>
+                              <div>
+                                <sub> ₹ {analysisData.data.underlying_value.toLocaleString("en-IN")}</sub> 
+                              </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="font-semibold text-lg text-gray-100">
+                              {analysisData.data.timestamp}
+                            </div>
+                              <div className="text-sm text-gray-400">
+                                time ago
+                              </div>
+                          </td>
+                          <td className="px-6 py-4 text-center">
+                            <div className="font-medium text-gray-100">
+                              FUTURES
+                            </div>
+                              <div className="text-sm text-gray-400">
+                                Short Covering
+                              </div>
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                            <div className="font-medium text-gray-100">
+                              Fetched {analysisData.age}
+                            </div>
+                                <div className="text-sm text-gray-400">
+                                 <button
+                                  onClick={handleFetchAnalysis}
+                                  disabled={analysisFetching}
+                                  className="btn-outline-primary inline-flex items-center text-sm">
+                                  {analysisFetching ? (
+                                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                  ) : (
+                                    <RefreshCw className="w-4 h-4 mr-2" />
+                                  )}
+                                  {analysisFetching ? 'Fetching...' : 'Fetch Latest'}
+                              </button>
+                                </div>
+                          </td>
+                        </tr>
+                        
+                        {/* Row 2: CE OI, Expiry, PE OI */}
+                        <tr>
+                          <td className="px-6 py-4 text-center">
+                            <div className="font-bold text-lg ">
+                              Total CE : {analysisData.data.ce_oi.toLocaleString("en-IN")}
+                            </div>
+                            {/* <div className="text-sm text-gray-400">CE Total OI</div> */}
+                          </td>
+                          <td className="px-6 py-4 text-center" colSpan={2}>
+                            <div className="font-bold text-lg text-nse-accent">
+                              Expiry : {selectedExpiry} <sub>({analysisData.data.days_to_expiry} days left)</sub>
+                            </div>
+                            {/* <div className="text-sm text-gray-400">Selected Expiry</div> */}
+                          </td>
+                          <td className="px-6 py-4 text-center">
+                            <div className="font-bold text-lg ">
+                              Total PE : {analysisData.data.pe_oi.toLocaleString("en-IN")}
+                            </div>
+                            {/* <div className="text-sm text-gray-400">PE Total OI</div> */}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
                   </div>
-                  
+                </div>
+
+                {/* Options Chain Table - Separate table, no gap */}
+                <div className="card-glow rounded-b-lg overflow-hidden -mt-0">
                   <div className="overflow-x-auto">
                     <table className="data-table">
                       <thead>

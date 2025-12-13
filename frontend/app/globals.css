@@ -6,7 +6,7 @@
   --foreground: #f1f5f9;
   --nse-primary: #1E293B;
   --nse-secondary: #3B82F6;
-  --nse-accent: #10B981;
+  --nse-accent: #0aa1b9;
   --nse-surface: #334155;
   --nse-error: #f87171;
   --nse-warning: #facc15;
@@ -313,7 +313,7 @@ body {
 }
 
 .text-gradient {
-  background: linear-gradient(to right, var(--nse-accent), #34d399);
+  background: linear-gradient(to right, var(--nse-accent), #30c6d1);
   background-clip: text;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -321,7 +321,7 @@ body {
 }
 
 .text-gradient-blue {
-  background: linear-gradient(to right, var(--nse-secondary), #60a5fa);
+  background: linear-gradient(to right, var(--nse-secondary), #599ef3);
   background-clip: text;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
