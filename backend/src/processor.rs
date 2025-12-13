@@ -255,8 +255,8 @@ fn calculate_tambu(detail: &OptionDetail) -> Option<String> {
         return Some("TMJ".to_string());
     }
     
-    // TMG: pchangeinOpenInterest < -10% AND pchange > 16%
-    if pchange_in_oi < -10.0 && pchange > 16.0 {
+    // TMG: pchangeinOpenInterest < -10% AND pchange > 15%
+    if pchange_in_oi < -10.0 && pchange > 15.0 {
         return Some("TMG".to_string());
     }
     
