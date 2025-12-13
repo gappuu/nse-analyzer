@@ -27,6 +27,7 @@ export interface ProcessedOptionDetail {
   tambu?: string;
   time_val: number;
   days_to_expiry: number;
+  oiRank?: number;
 }
 
 export interface ProcessedOptionData {

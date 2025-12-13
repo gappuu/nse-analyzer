@@ -45,8 +45,9 @@ export class DataStorage {
   }
 
   // Get data age in human readable format
-  getDataAge(lastUpdated: number): string {
-    const now = Date.now();
+  // Updated to accept optional currentTime parameter for real-time updates
+  getDataAge(lastUpdated: number, currentTime?: number): string {
+    const now = currentTime || Date.now();
     const diffMs = now - lastUpdated;
     const diffMinutes = Math.floor(diffMs / (1000 * 60));
     const diffHours = Math.floor(diffMs / (1000 * 60 * 60));

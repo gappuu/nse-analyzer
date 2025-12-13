@@ -30,6 +30,43 @@ export default function SecurityPage() {
   const [fetching, setFetching] = useState(false);
   const [analysisFetching, setAnalysisFetching] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [currentTime, setCurrentTime] = useState(Date.now());
+
+  // Real-time duration update effect
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentTime(Date.now());
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  // Function to calculate real-time age
+  const getRealTimeAge = (lastUpdated: number) => {
+    return db.getDataAge(lastUpdated, currentTime);
+  };
+
+  // Function to get OI rank styling
+  const getOIRankStyling = (oiRank?: number) => {
+    if (!oiRank || ![1, 2, 3].includes(oiRank)) {
+      return { className: '', showRank: false };
+    }
+    
+    let className = 'relative ';
+    switch (oiRank) {
+      case 1:
+        className += 'bg-yellow-500/20  border-yellow-500 font-semibold';
+        break;
+      case 2:
+        className += 'bg-yellow-500/20  border-orange-500 font-semibold';
+        break;
+      case 3:
+        className += 'bg-yellow-500/20 border-blue-500 font-semibold';
+        break;
+    }
+    
+    return { className, showRank: true };
+  };
 
   useEffect(() => {
     const fetchContractInfo = async () => {
@@ -191,7 +228,7 @@ export default function SecurityPage() {
                   <span className="text-gray-500">•</span>
                   <div className="flex items-center gap-2">
                     <Clock className="w-4 h-4 text-gray-500" />
-                    <span className="text-gray-400">Updated {contractData.age}</span>
+                    <span className="text-gray-400">Updated {getRealTimeAge(contractData.lastUpdated)}</span>
                   </div>
                 </div>
                 
@@ -260,7 +297,7 @@ export default function SecurityPage() {
                     <span className="text-gray-500">•</span>
                     <div className="flex items-center gap-2">
                       <Clock className="w-4 h-4 text-gray-500" />
-                      <span className="text-gray-400">Updated {analysisData.age}</span>
+                      <span className="text-gray-400">Updated {getRealTimeAge(analysisData.lastUpdated)}</span>
                     </div>
                   </div>
                   
@@ -427,7 +464,7 @@ export default function SecurityPage() {
                               {analysisData.data.timestamp}
                             </div>
                               <div className="text-sm text-gray-400">
-                                time ago
+                                {getRealTimeAge(analysisData.lastUpdated)}
                               </div>
                           </td>
                           <td className="px-6 py-4 text-center">
@@ -440,7 +477,7 @@ export default function SecurityPage() {
                           </td>
                           <td className="px-6 py-4 text-right">
                             <div className="font-medium text-gray-100">
-                              Fetched {analysisData.age}
+                              Fetched {getRealTimeAge(analysisData.lastUpdated)}
                             </div>
                                 <div className="text-sm text-gray-400">
                                  <button
@@ -508,62 +545,81 @@ export default function SecurityPage() {
                       <tbody>
                         {analysisData.data.processed_data
                           .sort((a, b) => (b.strikePrice || 0) - (a.strikePrice || 0))
-                          .map((option, index) => (
-                          <tr key={index}>
-                            {/* CE Data */}
-                            <td className={option.CE?.openInterest ? '' : 'text-gray-400'}>
-                              {Number(option.CE?.openInterest) || '-'}
-                            </td>
-                            <td className={option.CE?.pchangeinOpenInterest ? 
-                              (option.CE.pchangeinOpenInterest > 0 ? 'pchange-positive' : 'pchange-negative') : 'pchange-neutral'}>
-                              {option.CE?.pchangeinOpenInterest ? 
-                                `${option.CE.pchangeinOpenInterest > 0 ? '+' : ''}${option.CE.pchangeinOpenInterest.toFixed(1)}%` : '0'}
-                            </td>
-                            <td className={option.CE ? getMoneyStatusColor(option.CE.the_money) : 'text-gray-400'}>
-                              {option.CE?.the_money || '-'}
-                            </td>
-                            <td className={option.CE?.pchange ? 
-                              (option.CE.pchange > 0 ? 'pchange-positive' : 'pchange-negative') : 'pchange-neutral'}>
-                              {option.CE?.pchange ? 
-                                `${option.CE.pchange > 0 ? '+' : ''}${option.CE.pchange.toFixed(1)}%` : '-'}
-                            </td>
-                            <td className="option-ce">
-                              {option.CE?.lastPrice ? `₹${option.CE.lastPrice.toFixed(2)}` : '-'}
-                            </td>
-                            <td className="text-gray-300">
-                              {option.CE?.tambu || '-'}
-                            </td>
+                          .map((option, index) => {
+                            const ceOIRank = getOIRankStyling(option.CE?.oiRank);
+                            const peOIRank = getOIRankStyling(option.PE?.oiRank);
                             
-                            {/* Strike Price */}
-                            <td className={`font-bold text-center ${ option.CE ? getMoneyStatusColor(option.CE.the_money) : ""}`} style={{ backgroundColor: "rgba(51, 65, 85, 0.5)" }}> 
-                              {option.strikePrice}
-                            </td>
-                            
-                            {/* PE Data */}
-                            <td className="text-gray-300">
-                              {option.PE?.tambu || '-'}
-                            </td>
-                            <td className="option-pe">
-                              {option.PE?.lastPrice ? `₹${option.PE.lastPrice.toFixed(2)}` : '-'}
-                            </td>
-                            <td className={option.PE?.pchange ? 
-                              (option.PE.pchange > 0 ? 'pchange-positive' : 'pchange-negative') : 'pchange-neutral'}>
-                              {option.PE?.pchange ? 
-                                `${option.PE.pchange > 0 ? '+' : ''}${option.PE.pchange.toFixed(1)}%` : '-'}
-                            </td>
-                            <td className={option.PE ? getMoneyStatusColor(option.PE.the_money) : 'text-gray-400'}>
-                              {option.PE?.the_money || '-'}
-                            </td>
-                            <td className={option.PE?.pchangeinOpenInterest ? 
-                              (option.PE.pchangeinOpenInterest > 0 ? 'pchange-positive' : 'pchange-negative') : 'pchange-neutral'}>
-                              {option.PE?.pchangeinOpenInterest ? 
-                                `${option.PE.pchangeinOpenInterest > 0 ? '+' : ''}${option.PE.pchangeinOpenInterest.toFixed(1)}%` : '0'}
-                            </td>
-                            <td className={option.PE?.openInterest ? '' : 'text-gray-400'}>
-                              {Number(option.PE?.openInterest) || '-'}
-                            </td>
-                          </tr>
-                        ))}
+                            return (
+                              <tr key={index}>
+                                {/* CE Data */}
+                                <td className={`${option.CE?.openInterest ? ceOIRank.className : 'text-gray-400'}`}>
+                                  <div>
+                                    {Number(option.CE?.openInterest) || '-'}
+                                    {ceOIRank.showRank && (
+                                      <sup className="ml-1 text-xs ">
+                                        {option.CE?.oiRank}
+                                      </sup>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className={option.CE?.pchangeinOpenInterest ? 
+                                  (option.CE.pchangeinOpenInterest > 0 ? 'pchange-positive' : 'pchange-negative') : 'pchange-neutral'}>
+                                  {option.CE?.pchangeinOpenInterest ? 
+                                    `${option.CE.pchangeinOpenInterest > 0 ? '+' : ''}${option.CE.pchangeinOpenInterest.toFixed(1)}%` : '0'}
+                                </td>
+                                <td className={option.CE ? getMoneyStatusColor(option.CE.the_money) : 'text-gray-400'}>
+                                  {option.CE?.the_money || '-'}
+                                </td>
+                                <td className={option.CE?.pchange ? 
+                                  (option.CE.pchange > 0 ? 'pchange-positive' : 'pchange-negative') : 'pchange-neutral'}>
+                                  {option.CE?.pchange ? 
+                                    `${option.CE.pchange > 0 ? '+' : ''}${option.CE.pchange.toFixed(1)}%` : '-'}
+                                </td>
+                                <td className="option-ce">
+                                  {option.CE?.lastPrice ? `₹${option.CE.lastPrice.toFixed(2)}` : '-'}
+                                </td>
+                                <td className="text-gray-300">
+                                  {option.CE?.tambu || '-'}
+                                </td>
+                                
+                                {/* Strike Price */}
+                                <td className={`font-bold text-center ${ option.CE ? getMoneyStatusColor(option.CE.the_money) : ""}`} style={{ backgroundColor: "rgba(51, 65, 85, 0.5)" }}> 
+                                  {option.strikePrice}
+                                </td>
+                                
+                                {/* PE Data */}
+                                <td className="text-gray-300">
+                                  {option.PE?.tambu || '-'}
+                                </td>
+                                <td className="option-pe">
+                                  {option.PE?.lastPrice ? `₹${option.PE.lastPrice.toFixed(2)}` : '-'}
+                                </td>
+                                <td className={option.PE?.pchange ? 
+                                  (option.PE.pchange > 0 ? 'pchange-positive' : 'pchange-negative') : 'pchange-neutral'}>
+                                  {option.PE?.pchange ? 
+                                    `${option.PE.pchange > 0 ? '+' : ''}${option.PE.pchange.toFixed(1)}%` : '-'}
+                                </td>
+                                <td className={option.PE ? getMoneyStatusColor(option.PE.the_money) : 'text-gray-400'}>
+                                  {option.PE?.the_money || '-'}
+                                </td>
+                                <td className={option.PE?.pchangeinOpenInterest ? 
+                                  (option.PE.pchangeinOpenInterest > 0 ? 'pchange-positive' : 'pchange-negative') : 'pchange-neutral'}>
+                                  {option.PE?.pchangeinOpenInterest ? 
+                                    `${option.PE.pchangeinOpenInterest > 0 ? '+' : ''}${option.PE.pchangeinOpenInterest.toFixed(1)}%` : '0'}
+                                </td>
+                                <td className={`${option.PE?.openInterest ? peOIRank.className : 'text-gray-400'}`}>
+                                  <div>
+                                    {Number(option.PE?.openInterest) || '-'} 
+                                    {peOIRank.showRank && (
+                                      <sup className="ml-1 text-xs">
+                                        {option.PE?.oiRank}
+                                      </sup>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
                       </tbody>
                     </table>
                   </div>
