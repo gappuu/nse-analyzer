@@ -204,10 +204,22 @@ export default function SecurityPage() {
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <header className="mb-8">
-          <Link href="/" className="inline-flex items-center text-gray-400 hover:text-nse-accent transition-colors mb-4">
+
+          {/* <Link href="/" className="inline-flex items-center text-gray-400 hover:text-nse-accent transition-colors mb-4">
             <ArrowLeft className="w-4 h-4 mr-2" />
             Back to Securities
-          </Link>
+          </Link> */}
+
+          <div className="flex items-center justify-between mb-4">
+            <Link href="/" className="inline-flex items-center text-gray-400 hover:text-nse-accent transition-colors">
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Back to Securities
+            </Link>
+
+            <Link href="/batch" className="inline-flex items-center text-gray-400 hover:text-nse-accent transition-colors">
+              Go to Batch
+            </Link>
+          </div>
           
           <div className="flex items-center gap-4 mb-6">
             <h1 className="text-4xl font-display font-bold text-gradient">
