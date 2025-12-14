@@ -1,3 +1,5 @@
 /dist/
 /macos/
 /logs/
+
+.DS_Store
