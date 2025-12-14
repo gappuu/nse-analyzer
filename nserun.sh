@@ -26,6 +26,7 @@ log() {
 
 cleanup() {
     log "🛑 Stopping services..."
+
     for PID in "${CHILD_PIDS[@]}"; do
         if kill -0 "$PID" 2>/dev/null; then
             log "🔪 Killing process tree for PID $PID"
@@ -33,6 +34,17 @@ cleanup() {
             kill "$PID" 2>/dev/null || true
         fi
     done
+
+    # Delete log files
+    if [[ -f "$BACKEND_LOG" ]]; then
+        rm -f "$BACKEND_LOG"
+        log "🗑️ Deleted backend log"
+    fi
+    if [[ -f "$FRONTEND_LOG" ]]; then
+        rm -f "$FRONTEND_LOG"
+        log "🗑️ Deleted frontend log"
+    fi
+
     log "✅ Services stopped"
     exit 0
 }
