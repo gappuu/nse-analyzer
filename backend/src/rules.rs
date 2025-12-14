@@ -175,7 +175,7 @@ fn check_option_rules(
         tv < max_factor * underlying_value &&     // time value very small vs spot
         (tv / d) < 0.0005 * underlying_value;     // per-day time cost tiny
 
-    if is_cheap {
+    if is_cheap && matches!(detail.the_money.as_str(), "ATM" | "1 OTM" | "1 ITM"){
         alerts.push(Alert {
             symbol: symbol.to_string(),
             strike_price: strike,
@@ -199,7 +199,7 @@ fn check_option_rules(
         }
 
     // Rule 4: Negative Time Value
-    if tv < -0.0 && last_price > Some(0.0){
+    if tv < -0.0 && last_price.is_some_and(|lp| lp > 0.0) && matches!(detail.the_money.as_str(), "ATM" | "1 OTM" | "1 ITM") {
         alerts.push(Alert {
             symbol: symbol.to_string(),
             strike_price: strike,
