@@ -564,7 +564,8 @@ export default function SecurityPage() {
                                 {/* CE Data */}
                                 <td className={`${option.CE?.openInterest ? ceOIRank.className : 'text-gray-400'}`}>
                                   <div>
-                                    {Number(option.CE?.openInterest) || '-'}
+                                    {/* {Number(option.CE?.openInterest) || '-'} */}
+                                    {option.CE?.openInterest != null ? Math.trunc(Number(option.CE.openInterest)) : '-'}
                                     {ceOIRank.showRank && (
                                       <sup className="ml-1 text-xs ">
                                         {option.CE?.oiRank}
@@ -619,7 +620,8 @@ export default function SecurityPage() {
                                 </td>
                                 <td className={`${option.PE?.openInterest ? peOIRank.className : 'text-gray-400'}`}>
                                   <div>
-                                    {Number(option.PE?.openInterest) || '-'}
+                                    {/* {Number(option.PE?.openInterest) || '-'} */}
+                                    {option.PE?.openInterest != null ? Math.trunc(Number(option.PE.openInterest)) : '-'}
                                     {peOIRank.showRank && (
                                       <sup className="ml-1 text-xs">
                                         {option.PE?.oiRank}
