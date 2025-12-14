@@ -11,13 +11,15 @@ FRONTEND_DIR="$HOME/Desktop/nse-analyzer/frontend"
 cleanup() {
   echo
   echo "🛑 Stopping services..."
+
   for PID in "${CHILD_PIDS[@]}"; do
     if kill -0 "$PID" 2>/dev/null; then
-      echo "🔪 Killing PID $PID"
-      kill "$PID"
+      echo "🔪 Killing process tree for PID $PID"
+      pkill -TERM -P "$PID" 2>/dev/null || true
+      kill "$PID" 2>/dev/null || true
     fi
   done
-  wait
+
   echo "✅ Services stopped"
   exit 0
 }
@@ -40,37 +42,38 @@ done
 echo
 echo "🦀 Building Rust backend (release, no incremental)..."
 (
-  cd "$BACKEND_DIR" || exit 1
+  cd "$BACKEND_DIR"
   CARGO_INCREMENTAL=0 cargo build --release
 )
 
-echo "🚀 Running Rust backend on port 3001..."
+echo "🚀 Starting Rust backend on port 3001..."
 (
-  cd "$BACKEND_DIR" || exit 1
-  NSE_MODE=server NSE_PORT=3001 \
-    ./target/release/$(basename "$BACKEND_DIR")
+  cd "$BACKEND_DIR"
+  NSE_MODE=server NSE_PORT=3001 ./target/release/nse-analyzer
 ) &
 CHILD_PIDS+=($!)
 
 #######################################
-# Frontend (Node)
+# Frontend (Next.js)
 #######################################
 
 echo
 echo "📦 Building frontend..."
 (
-  cd "$FRONTEND_DIR" || exit 1
+  cd "$FRONTEND_DIR"
   npm run build
 )
 
 echo "🚀 Starting frontend on port 3000..."
 (
-  cd "$FRONTEND_DIR" || exit 1
+  cd "$FRONTEND_DIR"
   npm run dev
 ) &
 CHILD_PIDS+=($!)
 
 echo
-echo "✅ All services running (Ctrl+C to stop)"
+echo "✅ Backend + Frontend running"
+echo "Press Ctrl+C to stop everything"
 
+# Keep script alive
 wait
