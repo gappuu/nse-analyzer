@@ -508,9 +508,15 @@ function AlertCard({ alert }: { alert: Alert }) {
             <span className={getAlertBadgeClass(alert.alert_type)}>
               {alert.alert_type.replace(/_/g, ' ')}
             </span>
-            <span className={`font-medium ${
+            {/* <span className={`font-medium ${
               alert.option_type === 'CE' ? 'text-green-400' : 'text-red-400'
             }`}>
+              {alert.option_type}
+            </span> */}
+            <span className={`font-medium ${
+                (alert.option_type === 'CE' && alert.alert_type === 'HUGE_OI_INCREASE') ||
+                (alert.option_type === 'PE' && alert.alert_type === 'HUGE_OI_DECREASE')
+                ? 'text-red-400': 'text-green-400'}`}>
               {alert.option_type}
             </span>
             <span className="text-gray-400">

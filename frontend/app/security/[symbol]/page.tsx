@@ -418,11 +418,17 @@ export default function SecurityPage() {
                               <span className={getAlertBadgeClass(alert.alert_type)}>
                                 {alert.alert_type.replace('_', ' ')}
                               </span>
-                              <span className={`font-medium ${
+                              {/* <span className={`font-medium ${
                                 alert.option_type === 'CE' ? 'text-green-400' : 'text-red-400'
                               }`}>
                                 {alert.option_type}
-                              </span>
+                              </span> */}
+                              <span className={`font-medium ${
+                                (alert.option_type === 'CE' && alert.alert_type === 'HUGE_OI_INCREASE') ||
+                                (alert.option_type === 'PE' && alert.alert_type === 'HUGE_OI_DECREASE')
+                                  ? 'text-red-400': 'text-green-400'}`}>
+                              {alert.option_type}
+                            </span>
                               <span className="text-gray-400">
                                 Strike: ₹{alert.strike_price} 
                               </span>
