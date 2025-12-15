@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import {
   ArrowLeft,
   Calendar,
@@ -18,9 +18,10 @@ import { apiClient, handleApiError, getAlertBadgeClass, formatCurrency, getMoney
 import { db } from '@/app/lib/db';
 import { ContractInfoResponse, SingleAnalysisResponse, DataWithAge } from '@/app/types/api';
 
-export default function SecurityPage() {
-  const params = useParams();
-  const symbol = params.symbol as string;
+// Separate component that uses useSearchParams - wrapped in Suspense
+function SecurityPageContent() {
+  const searchParams = useSearchParams();
+  const symbol = searchParams.get('symbol');
   
   const [contractData, setContractData] = useState<DataWithAge<ContractInfoResponse> | null>(null);
   const [selectedExpiry, setSelectedExpiry] = useState<string | null>(null);
@@ -80,6 +81,12 @@ export default function SecurityPage() {
 
   useEffect(() => {
     const fetchContractInfo = async () => {
+      if (!symbol) {
+        setError('No symbol provided in URL');
+        setLoading(false);
+        return;
+      }
+
       try {
         setLoading(true);
         setError(null);
@@ -109,12 +116,12 @@ export default function SecurityPage() {
       }
     };
 
-    if (symbol) {
-      fetchContractInfo();
-    }
+    fetchContractInfo();
   }, [symbol]);
 
   const fetchAnalysis = async (expiry: string, forceRefresh = false) => {
+    if (!symbol) return;
+
     try {
       if (forceRefresh) {
         setAnalysisFetching(true);
@@ -150,6 +157,8 @@ export default function SecurityPage() {
   };
 
   const handleFetchContractInfo = () => {
+    if (!symbol) return;
+    
     setFetching(true);
     apiClient.getContractInfo(symbol, true)
       .then(response => {
@@ -172,6 +181,21 @@ export default function SecurityPage() {
       fetchAnalysis(selectedExpiry, true);
     }
   };
+
+  if (!symbol) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center max-w-md">
+          <AlertCircle className="w-16 h-16 text-nse-error mx-auto mb-4" />
+          <h1 className="text-2xl font-bold text-gray-100 mb-2">No Symbol Specified</h1>
+          <p className="text-gray-400 mb-6">Please provide a security symbol in the URL parameters.</p>
+          <Link href="/" className="btn-primary">
+            Back to Home
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -204,19 +228,13 @@ export default function SecurityPage() {
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <header className="mb-8">
-
-          {/* <Link href="/" className="inline-flex items-center text-gray-400 hover:text-nse-accent transition-colors mb-4">
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Back to Securities
-          </Link> */}
-
           <div className="flex items-center justify-between mb-4">
             <Link href="/" className="inline-flex items-center text-gray-400 hover:text-nse-accent transition-colors">
               <ArrowLeft className="w-4 h-4 mr-2" />
               Back to Securities
             </Link>
 
-            <Link href="/batch" className="inline-flex items-center text-gray-400 hover:text-nse-accent transition-colors">
+            <Link href="/batch/" className="inline-flex items-center text-gray-400 hover:text-nse-accent transition-colors">
               Go to Batch
             </Link>
           </div>
@@ -352,7 +370,6 @@ export default function SecurityPage() {
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                   <div className="card-glow rounded-lg p-6">
                     <div className="flex items-center gap-3 mb-2">
-                      {/* <DollarSign className="w-5 h-5 text-nse-accent" /> */}
                       <span className="text-sm text-gray-400">Underlying Value</span>
                     </div>
                     <p className="text-2xl font-bold text-gray-100">
@@ -388,9 +405,6 @@ export default function SecurityPage() {
                       <TrendingUp className="w-5 h-5 text-nse-accent" />
                       <span className="text-sm text-gray-400">Total OI</span>
                     </div>
-                    {/* <p className="text-2xl font-bold text-gray-100">
-                      {((analysisData.data.ce_oi + analysisData.data.pe_oi) ).toFixed(0)}
-                    </p> */}
                     <p className="text-2xl font-bold text-gray-100">
                       CE : {Number(analysisData.data.ce_oi).toLocaleString("en-IN", {maximumFractionDigits: 0,})}
                     </p>
@@ -418,11 +432,6 @@ export default function SecurityPage() {
                               <span className={getAlertBadgeClass(alert.alert_type)}>
                                 {alert.alert_type.replace('_', ' ')}
                               </span>
-                              {/* <span className={`font-medium ${
-                                alert.option_type === 'CE' ? 'text-green-400' : 'text-red-400'
-                              }`}>
-                                {alert.option_type}
-                              </span> */}
                               <span className={`font-medium ${
                                 (alert.option_type === 'CE' && alert.alert_type === 'HUGE_OI_INCREASE') ||
                                 (alert.option_type === 'PE' && alert.alert_type === 'HUGE_OI_DECREASE')
@@ -529,19 +538,16 @@ export default function SecurityPage() {
                             <div className="font-bold text-lg ">
                               Total CE : {analysisData.data.ce_oi.toLocaleString("en-IN")}
                             </div>
-                            {/* <div className="text-sm text-gray-400">CE Total OI</div> */}
                           </td>
                           <td className="px-6 py-4 text-center" colSpan={2}>
                             <div className="font-bold text-lg text-nse-accent">
                               Expiry : {selectedExpiry} <sub>({analysisData.data.days_to_expiry} days left)</sub>
                             </div>
-                            {/* <div className="text-sm text-gray-400">Selected Expiry</div> */}
                           </td>
                           <td className="px-6 py-4 text-center">
                             <div className="font-bold text-lg ">
                               Total PE : {analysisData.data.pe_oi.toLocaleString("en-IN")}
                             </div>
-                            {/* <div className="text-sm text-gray-400">PE Total OI</div> */}
                           </td>
                         </tr>
                       </tbody>
@@ -582,7 +588,6 @@ export default function SecurityPage() {
                                 {/* CE Data */}
                                 <td className={`${option.CE?.openInterest ? ceOIRank.className : 'text-gray-400'}`}>
                                   <div>
-                                    {/* {Number(option.CE?.openInterest) || '-'} */}
                                     {option.CE?.openInterest != null ? Math.trunc(Number(option.CE.openInterest)) : '-'}
                                     {ceOIRank.showRank && (
                                       <sup className="ml-1 text-xs ">
@@ -638,7 +643,6 @@ export default function SecurityPage() {
                                 </td>
                                 <td className={`${option.PE?.openInterest ? peOIRank.className : 'text-gray-400'}`}>
                                   <div>
-                                    {/* {Number(option.PE?.openInterest) || '-'} */}
                                     {option.PE?.openInterest != null ? Math.trunc(Number(option.PE.openInterest)) : '-'}
                                     {peOIRank.showRank && (
                                       <sup className="ml-1 text-xs">
@@ -671,5 +675,26 @@ export default function SecurityPage() {
         )}
       </div>
     </div>
+  );
+}
+
+// Loading component for Suspense fallback
+function SecurityPageLoading() {
+  return (
+    <div className="min-h-screen flex items-center justify-center">
+      <div className="text-center">
+        <Loader2 className="w-12 h-12 animate-spin mx-auto text-nse-accent mb-4" />
+        <p className="text-gray-400 text-lg">Loading security page...</p>
+      </div>
+    </div>
+  );
+}
+
+// Main component with Suspense wrapper
+export default function SecurityPage() {
+  return (
+    <Suspense fallback={<SecurityPageLoading />}>
+      <SecurityPageContent />
+    </Suspense>
   );
 }

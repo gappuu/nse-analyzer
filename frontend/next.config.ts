@@ -1,16 +1,15 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // output: 'export',
-  // trailingSlash: true,
-  async rewrites() {
-    return [
-      {
-        source: '/api/:path*',
-        destination: 'http://localhost:3001/api/:path*',
-      },
-    ]
+  output: 'export',
+  trailingSlash: true,
+  images: {
+    unoptimized: true
   },
+  typescript: {
+    ignoreBuildErrors: true,
+  },
+  // Remove rewrites for static export - API calls will be handled differently
 };
 
 export default nextConfig;

@@ -116,16 +116,16 @@ healthcheck "http://127.0.0.1:$BACKEND_PORT/api/securities"
 # ==============================
 # FRONTEND
 # ==============================
-# log "📦 Building frontend..."
-# (
-#     cd "$FRONTEND_DIR"
-#     npm run build >>"$FRONTEND_LOG" 2>&1
-# )
+log "📦 Building frontend..."
+(
+    cd "$FRONTEND_DIR"
+    npm run build >>"$FRONTEND_LOG" 2>&1
+)
 
 log "🚀 Starting frontend on port $FRONTEND_PORT..."
 (
     cd "$FRONTEND_DIR"
-    npm run start >>"$FRONTEND_LOG" 2>&1
+    npm run dev >>"$FRONTEND_LOG" 2>&1
 ) &
 CHILD_PIDS+=($!)
 

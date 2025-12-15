@@ -456,7 +456,7 @@ export default function BatchAnalysisPage() {
   );
 }
 
-// Security Result Card Component
+// Security Result Card Component - Updated to use query parameters
 function SecurityResultCard({ result }: { result: RulesOutput }) {
   return (
     <div className="card-glow rounded-lg overflow-hidden">
@@ -479,7 +479,7 @@ function SecurityResultCard({ result }: { result: RulesOutput }) {
           </div>
           
           <Link 
-            href={`/security/${result.symbol}`}
+            href={`/security/?symbol=${encodeURIComponent(result.symbol)}`}
             className="btn-primary text-sm"
           >
             View Details
@@ -508,11 +508,6 @@ function AlertCard({ alert }: { alert: Alert }) {
             <span className={getAlertBadgeClass(alert.alert_type)}>
               {alert.alert_type.replace(/_/g, ' ')}
             </span>
-            {/* <span className={`font-medium ${
-              alert.option_type === 'CE' ? 'text-green-400' : 'text-red-400'
-            }`}>
-              {alert.option_type}
-            </span> */}
             <span className={`font-medium ${
                 (alert.option_type === 'CE' && alert.alert_type === 'HUGE_OI_INCREASE') ||
                 (alert.option_type === 'PE' && alert.alert_type === 'HUGE_OI_DECREASE')
