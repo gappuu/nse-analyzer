@@ -3,6 +3,7 @@ use crate::models::{ContractInfo, OptionChain, Security, SecurityType};
 use anyhow::{anyhow, Context, Result};
 use rand::{seq::SliceRandom, thread_rng};
 use reqwest::{header, Client, StatusCode};
+use serde_json::Value;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Semaphore, RwLock};
@@ -202,6 +203,88 @@ impl NSEClient {
             .context("Failed to parse option chain")?;
         
         Ok(chain)
+    }
+
+    // -----------------------------------------------
+    // NEW API A: FETCH FUTURES DATA
+    // -----------------------------------------------
+    pub async fn fetch_futures_data(
+        &self,
+        symbol: &str,
+        expiry: &str,
+    ) -> Result<Value> {
+        let url = format!(
+            "{}/api/NextApi/apiClient/GetQuoteApi?functionName=getSymbolDerivativesData&symbol={}&instrumentType=FUT&expiryDt={}",
+            config::NSE_BASE_URL,
+            urlencoding::encode(symbol),
+            urlencoding::encode(expiry)
+        );
+        
+        let text = self.fetch_json(&url).await?;
+        let data: Value = serde_json::from_str(&text)
+            .context("Failed to parse futures data")?;
+        
+        Ok(data)
+    }
+
+    // -----------------------------------------------
+    // NEW API B: FETCH DERIVATIVES HISTORICAL DATA
+    // -----------------------------------------------
+    pub async fn fetch_derivatives_historical_data(
+        &self,
+        symbol: &str,
+        security_type: &SecurityType,
+        instrument_type: &str, // "OPTSTK", "FUTSTK", "OPTIDX", "FUTIDX"
+        year: Option<&str>,
+        expiry: &str,
+        strike_price: Option<&str>,
+        option_type: Option<&str>, // "CE" or "PE"
+        from_date: &str,
+        to_date: &str,
+    ) -> Result<Value> {
+        // Determine instrument type based on security type and instrument
+        let instype = match (security_type, instrument_type) {
+            (SecurityType::Equity, "OPTIONS") => "OPTSTK",
+            (SecurityType::Equity, "FUTURES") => "FUTSTK", 
+            (SecurityType::Indices, "OPTIONS") => "OPTIDX",
+            (SecurityType::Indices, "FUTURES") => "FUTIDX",
+            _ => instrument_type, // Use as provided if it's already in correct format
+        };
+
+        let mut url = format!(
+            "{}/api/NextApi/apiClient/GetQuoteApi?functionName=getDerivativesHistoricalData&symbol={}&instrumentType={}&expiryDate={}&fromDate={}&toDate={}",
+            config::NSE_BASE_URL,
+            urlencoding::encode(symbol),
+            urlencoding::encode(instype),
+            urlencoding::encode(expiry),
+            urlencoding::encode(from_date),
+            urlencoding::encode(to_date)
+        );
+
+        // Add optional parameters
+        if let Some(year_val) = year {
+            if !year_val.is_empty() {
+                url.push_str(&format!("&year={}", urlencoding::encode(year_val)));
+            }
+        }
+
+        if let Some(strike) = strike_price {
+            if !strike.is_empty() {
+                url.push_str(&format!("&strikePrice={}", urlencoding::encode(strike)));
+            }
+        }
+
+        if let Some(opt_type) = option_type {
+            if !opt_type.is_empty() {
+                url.push_str(&format!("&optionType={}", urlencoding::encode(opt_type)));
+            }
+        }
+
+        let text = self.fetch_json(&url).await?;
+        let data: Value = serde_json::from_str(&text)
+            .context("Failed to parse derivatives historical data")?;
+        
+        Ok(data)
     }
 
     // -----------------------------------------------

@@ -11,6 +11,7 @@ use axum::{
     Router,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -30,6 +31,24 @@ pub struct ContractInfoQuery {
 pub struct SingleAnalysisQuery {
     pub symbol: String,
     pub expiry: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct FuturesDataQuery {
+    pub symbol: String,
+    pub expiry: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DerivativesHistoricalQuery {
+    pub symbol: String,
+    pub instrument_type: String, // "OPTIONS" or "FUTURES"
+    pub year: Option<String>,
+    pub expiry: String,
+    pub strike_price: Option<String>,
+    pub option_type: Option<String>, // "CE" or "PE"
+    pub from_date: String,
+    pub to_date: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -276,6 +295,71 @@ async fn get_single_analysis(
     }
 }
 
+/// GET /api/futures-data?symbol=NIFTY&expiry=30-Dec-2025 - Get futures data
+async fn get_futures_data(
+    Query(query): Query<FuturesDataQuery>,
+    State(app_state): State<AppState>,
+) -> Result<Json<ApiResponse<Value>>, StatusCode> {
+    let start_time = Instant::now();
+    let symbol = &query.symbol;
+    let expiry = &query.expiry;
+
+    match app_state.client.fetch_futures_data(symbol, expiry).await {
+        Ok(data) => Ok(Json(ApiResponse {
+            success: true,
+            data: Some(data),
+            error: None,
+            processing_time_ms: Some(start_time.elapsed().as_millis() as u64),
+        })),
+        Err(e) => Ok(Json(ApiResponse {
+            success: false,
+            data: None,
+            error: Some(e.to_string()),
+            processing_time_ms: Some(start_time.elapsed().as_millis() as u64),
+        })),
+    }
+}
+
+/// GET /api/derivatives-historical - Get derivatives historical data
+async fn get_derivatives_historical_data(
+    Query(query): Query<DerivativesHistoricalQuery>,
+    State(app_state): State<AppState>,
+) -> Result<Json<ApiResponse<Value>>, StatusCode> {
+    let start_time = Instant::now();
+    
+    // Determine security type
+    let security_type = if config::NSE_INDICES.contains(&query.symbol.as_str()) {
+        SecurityType::Indices
+    } else {
+        SecurityType::Equity
+    };
+
+    match app_state.client.fetch_derivatives_historical_data(
+        &query.symbol,
+        &security_type,
+        &query.instrument_type,
+        query.year.as_deref(),
+        &query.expiry,
+        query.strike_price.as_deref(),
+        query.option_type.as_deref(),
+        &query.from_date,
+        &query.to_date,
+    ).await {
+        Ok(data) => Ok(Json(ApiResponse {
+            success: true,
+            data: Some(data),
+            error: None,
+            processing_time_ms: Some(start_time.elapsed().as_millis() as u64),
+        })),
+        Err(e) => Ok(Json(ApiResponse {
+            success: false,
+            data: None,
+            error: Some(e.to_string()),
+            processing_time_ms: Some(start_time.elapsed().as_millis() as u64),
+        })),
+    }
+}
+
 /// POST /api/batch-analysis - Run batch analysis
 async fn run_batch_analysis(
     State(app_state): State<AppState>,
@@ -427,6 +511,8 @@ pub async fn start_server(port: u16) -> Result<()> {
         .route("/api/contract-info", get(get_contract_info))
         .route("/api/single-analysis", get(get_single_analysis))
         .route("/api/batch-analysis", post(run_batch_analysis))
+        .route("/api/futures-data", get(get_futures_data))
+        .route("/api/derivatives-historical", get(get_derivatives_historical_data))
         .layer(CorsLayer::permissive())
         .with_state(app_state);
 
@@ -438,6 +524,8 @@ pub async fn start_server(port: u16) -> Result<()> {
     println!("   GET  /api/securities");
     println!("   GET  /api/contract-info?symbol=NIFTY");
     println!("   GET  /api/single-analysis?symbol=NIFTY&expiry=30-Dec-2025");
+    println!("   GET  /api/futures-data?symbol=NIFTY&expiry=30-Dec-2025");
+    println!("   GET  /api/derivatives-historical?symbol=NIFTY&instrument_type=FUTURES&expiry=30-Dec-2025&from_date=06-11-2025&to_date=06-12-2025");
     println!("   POST /api/batch-analysis");
     println!();
 

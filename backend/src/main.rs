@@ -259,6 +259,85 @@ async fn run_single(symbol: &str, expiry: &str) -> Result<()> {
     Ok(())
 }
 
+/// Test the new futures API
+async fn test_futures(symbol: &str, expiry: &str) -> Result<()> {
+    println!("{}", "=".repeat(60).blue());
+    println!("{}", "NSE Futures Data Test".green().bold());
+    println!("{}", "=".repeat(60).blue());
+    println!();
+
+    let client = NSEClient::new()?;
+
+    println!("{} Fetching futures data for {}...", "→".cyan(), symbol.yellow());
+    println!("{} Expiry: {}", "→".cyan(), expiry.yellow());
+    println!();
+
+    match client.fetch_futures_data(symbol, expiry).await {
+        Ok(data) => {
+            println!("{} Futures data fetched successfully", "✓".green());
+            println!("{} Data preview:", "ℹ".blue());
+            println!("{}", serde_json::to_string_pretty(&data)?);
+        }
+        Err(e) => {
+            println!("{} Failed to fetch futures data: {}", "✗".red(), e);
+        }
+    }
+
+    Ok(())
+}
+
+/// Test the new derivatives historical API
+async fn test_derivatives_historical(
+    symbol: &str,
+    instrument_type: &str,
+    expiry: &str,
+    from_date: &str,
+    to_date: &str,
+) -> Result<()> {
+    println!("{}", "=".repeat(60).blue());
+    println!("{}", "NSE Derivatives Historical Data Test".green().bold());
+    println!("{}", "=".repeat(60).blue());
+    println!();
+
+    let client = NSEClient::new()?;
+    
+    // Determine security type
+    let security_type = if config::NSE_INDICES.contains(&symbol) {
+        models::SecurityType::Indices
+    } else {
+        models::SecurityType::Equity
+    };
+
+    println!("{} Fetching derivatives historical data for {}...", "→".cyan(), symbol.yellow());
+    println!("{} Instrument: {}", "→".cyan(), instrument_type.yellow());
+    println!("{} Expiry: {}", "→".cyan(), expiry.yellow());
+    println!("{} Date range: {} to {}", "→".cyan(), from_date.yellow(), to_date.yellow());
+    println!();
+
+    match client.fetch_derivatives_historical_data(
+        symbol,
+        &security_type,
+        instrument_type,
+        None, // year
+        expiry,
+        None, // strike_price
+        None, // option_type
+        from_date,
+        to_date,
+    ).await {
+        Ok(data) => {
+            println!("{} Historical data fetched successfully", "✓".green());
+            println!("{} Data preview:", "ℹ".blue());
+            println!("{}", serde_json::to_string_pretty(&data)?);
+        }
+        Err(e) => {
+            println!("{} Failed to fetch historical data: {}", "✗".red(), e);
+        }
+    }
+
+    Ok(())
+}
+
 /// Run API server mode
 async fn run_server(port: u16) -> Result<()> {
     println!("{}", "=".repeat(60).blue());
@@ -281,6 +360,14 @@ async fn main() -> Result<()> {
     let symbol = config::get_single_symbol();
     let expiry = config::get_single_expiry();
     
+    // For test modes (new):
+    let test_from_date = std::env::var("NSE_FROM_DATE")
+        .unwrap_or_else(|_| "06-11-2025".to_string());
+    let test_to_date = std::env::var("NSE_TO_DATE")
+        .unwrap_or_else(|_| "06-12-2025".to_string());
+    let test_instrument = std::env::var("NSE_INSTRUMENT")
+        .unwrap_or_else(|_| "FUTURES".to_string());
+    
     // For server mode:
     let port = std::env::var("NSE_PORT")
         .unwrap_or_else(|_| "3001".to_string())
@@ -291,8 +378,8 @@ async fn main() -> Result<()> {
     if config::is_ci_environment() {
         println!("{}", "Running in CI environment (GitHub Actions)".blue());
         println!("{} Mode: {}", "→".cyan(), mode.yellow());
-        if mode == "single" || mode == "server" {
-            println!("{} Single/Server mode not supported in CI - switching to batch", "⚠".yellow());
+        if mode == "single" || mode == "server" || mode == "test-futures" || mode == "test-historical" {
+            println!("{} Test/Single/Server modes not supported in CI - switching to batch", "⚠".yellow());
         }
         println!();
     }
@@ -319,18 +406,38 @@ async fn main() -> Result<()> {
                 run_single(&symbol, &expiry).await?;
             }
         }
+        "test-futures" => {
+            if config::is_ci_environment() {
+                // Force batch mode in CI
+                println!("{} GitHub Actions only supports batch mode, running batch instead", "ℹ".blue());
+                run_batch().await?;
+            } else {
+                test_futures(&symbol, &expiry).await?;
+            }
+        }
+        "test-historical" => {
+            if config::is_ci_environment() {
+                // Force batch mode in CI
+                println!("{} GitHub Actions only supports batch mode, running batch instead", "ℹ".blue());
+                run_batch().await?;
+            } else {
+                test_derivatives_historical(&symbol, &test_instrument, &expiry, &test_from_date, &test_to_date).await?;
+            }
+        }
         _ => {
             if config::is_ci_environment() {
                 // Force batch mode in CI
                 println!("{} GitHub Actions only supports batch mode, switching to batch", "ℹ".blue());
                 run_batch().await?;
             } else {
-                eprintln!("Invalid mode '{}'. Use 'batch', 'single', or 'server'", mode);
+                eprintln!("Invalid mode '{}'. Use 'batch', 'single', 'server', 'test-futures', or 'test-historical'", mode);
                 eprintln!("Set NSE_MODE environment variable to control execution mode");
                 eprintln!("Examples:");
                 eprintln!("  NSE_MODE=server NSE_PORT=3001 cargo run   # Start API server on port 3001");
                 eprintln!("  NSE_MODE=batch cargo run                   # Run batch analysis");
                 eprintln!("  NSE_MODE=single NSE_SYMBOL=NIFTY NSE_EXPIRY=30-Dec-2025 cargo run");
+                eprintln!("  NSE_MODE=test-futures NSE_SYMBOL=NIFTY NSE_EXPIRY=30-Dec-2025 cargo run");
+                eprintln!("  NSE_MODE=test-historical NSE_SYMBOL=NIFTY NSE_EXPIRY=30-Dec-2025 NSE_INSTRUMENT=FUTURES NSE_FROM_DATE=06-11-2025 NSE_TO_DATE=06-12-2025 cargo run");
                 eprintln!("Note: GitHub Actions only supports 'batch' mode");
                 std::process::exit(1);
             }
