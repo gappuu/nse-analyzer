@@ -1,0 +1,20 @@
+{
+  "name": "nse-options-analyzer-tauri",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "tauri": "tauri",
+    "frontend:dev": "cd ../frontend && npm run dev",
+    "frontend:build": "cd ../frontend && npm run build-static",
+    "setup": "./setup.sh"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.0.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0"
+  }
+}
