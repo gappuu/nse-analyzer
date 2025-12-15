@@ -97,11 +97,11 @@ kill_port "$FRONTEND_PORT"
 # ==============================
 # BACKEND
 # ==============================
-log "🦀 Building Rust backend (release, no incremental)..."
-(
-    cd "$BACKEND_DIR"
-    CARGO_INCREMENTAL=0 cargo build --release >>"$BACKEND_LOG" 2>&1
-)
+# log "🦀 Building Rust backend (release, no incremental)..."
+# (
+#     cd "$BACKEND_DIR"
+#     CARGO_INCREMENTAL=0 cargo build --release >>"$BACKEND_LOG" 2>&1
+# )
 
 log "🚀 Starting Rust backend on port $BACKEND_PORT..."
 (
@@ -116,16 +116,16 @@ healthcheck "http://127.0.0.1:$BACKEND_PORT/api/securities"
 # ==============================
 # FRONTEND
 # ==============================
-log "📦 Building frontend..."
-(
-    cd "$FRONTEND_DIR"
-    npm run build >>"$FRONTEND_LOG" 2>&1
-)
+# log "📦 Building frontend..."
+# (
+#     cd "$FRONTEND_DIR"
+#     npm run build >>"$FRONTEND_LOG" 2>&1
+# )
 
 log "🚀 Starting frontend on port $FRONTEND_PORT..."
 (
     cd "$FRONTEND_DIR"
-    npm run dev >>"$FRONTEND_LOG" 2>&1
+    npm run start >>"$FRONTEND_LOG" 2>&1
 ) &
 CHILD_PIDS+=($!)
 
