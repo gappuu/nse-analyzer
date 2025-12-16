@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { apiClient, handleApiError, getAlertBadgeClass, formatCurrency, getMoneyStatusColor } from '@/app/lib/api';
 import { db } from '@/app/lib/db';
-import { ContractInfoResponse, SingleAnalysisResponse, DataWithAge,FuturesAnalysis, FuturesDataResponse } from '@/app/types/api';
+import { ContractInfoResponse, SingleAnalysisResponse, DataWithAge,FuturesAnalysis } from '@/app/types/api';
 
 
 // Separate component that uses useSearchParams - wrapped in Suspense
@@ -89,23 +89,17 @@ function SecurityPageContent() {
   };
 
   // Function to fetch futures data and analyze action
-  const fetchFuturesAnalysis = async (expiry: string) => {
+  const fetchFuturesAnalysis = async (expiry: string, forceRefresh = false) => {
     if (!symbol || !expiry) return;
     
     try {
       setFuturesLoading(true);
       
       const futuresExpiry = getFuturesExpiry(expiry, contractData?.data.expiry_dates || []);
-      const response = await fetch(`/api/futures-data?symbol=${symbol}&expiry=${futuresExpiry}`);
+      const response = await apiClient.getFuturesData(symbol, futuresExpiry, forceRefresh);
       
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      const futuresData: FuturesDataResponse = await response.json();
-      
-      if (futuresData.success && futuresData.data.data.length > 0) {
-        const data = futuresData.data.data[0];
+      if (response.success && response.data && response.data.data.length > 0) {
+        const data = response.data.data[0];
         const { pchange, pchangeinOpenInterest, underlyingValue } = data;
         
         let action = '';
@@ -132,10 +126,10 @@ function SecurityPageContent() {
           action,
           color,
           underlyingValue,
-          timestamp: futuresData.data.timestamp
+          timestamp: response.data.timestamp
         });
       } else {
-        console.error('No futures data available or API error:', futuresData.error);
+        console.error('No futures data available or API error:', response.error);
         setFuturesAnalysis({
           action: 'No Data',
           color: 'text-gray-500',
@@ -282,6 +276,8 @@ function SecurityPageContent() {
   const handleFetchAnalysis = () => {
     if (selectedExpiry) {
       fetchAnalysis(selectedExpiry, true);
+      // Also refresh futures data
+      fetchFuturesAnalysis(selectedExpiry, true);
     }
   };
 
@@ -609,7 +605,7 @@ function SecurityPageContent() {
                           </td>
                           <td className="px-6 py-4 text-center">
                             <div className="font-medium text-gray-100">
-                              FUTURES
+                              FUTURES : {futuresAnalysis?.underlyingValue}
                             </div>
                             <div className="text-sm">
                               {futuresLoading ? (
@@ -619,7 +615,7 @@ function SecurityPageContent() {
                                 </div>
                               ) : futuresAnalysis ? (
                                 <span className={futuresAnalysis.color}>
-                                  {futuresAnalysis.action}
+                                  {futuresAnalysis.action} <sub>{futuresAnalysis?.timestamp}</sub>
                                 </span>
                               ) : (
                                 <span className="text-gray-400">No Data</span>
