@@ -138,6 +138,11 @@ impl AppState {
 // API HANDLERS
 // -----------------------------------------------
 
+/// GET /health - Health check endpoint
+async fn health() -> &'static str {
+    "OK"
+}
+
 /// GET /api/securities - Get all FNO securities list
 async fn get_securities(State(app_state): State<AppState>) -> Result<Json<ApiResponse<SecurityListResponse>>, StatusCode> {
     let start_time = Instant::now();
@@ -507,6 +512,7 @@ pub async fn start_server(port: u16) -> Result<()> {
     let app_state = AppState::new()?;
 
     let app = Router::new()
+        .route("/health", get(health))
         .route("/api/securities", get(get_securities))
         .route("/api/contract-info", get(get_contract_info))
         .route("/api/single-analysis", get(get_single_analysis))
@@ -521,6 +527,7 @@ pub async fn start_server(port: u16) -> Result<()> {
     
     println!("🚀 NSE API Server running on http://{}", addr);
     println!("📋 Available endpoints:");
+    println!("   GET  /health");
     println!("   GET  /api/securities");
     println!("   GET  /api/contract-info?symbol=NIFTY");
     println!("   GET  /api/single-analysis?symbol=NIFTY&expiry=30-Dec-2025");
