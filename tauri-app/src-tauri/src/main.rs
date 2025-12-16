@@ -27,13 +27,16 @@ impl BackendProcess {
             let _ = child.wait();
         }
 
-        // Start new backend process
+        // Start new backend process with required environment variables
         match Command::new(backend_path)
+            .env("NSE_MODE", "server")           // Set server mode
+            .env("NSE_PORT", "3001")             // Set port
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
         {
             Ok(child) => {
+                println!("✅ Backend started with NSE_MODE=server NSE_PORT=3001");
                 *process_guard = Some(child);
                 Ok(())
             }
@@ -80,15 +83,97 @@ async fn start_backend(
     backend_process: State<'_, BackendProcess>,
     app_handle: AppHandle,
 ) -> Result<String, String> {
-    // Get the backend binary path from resources
-    let resource_dir = app_handle
-        .path()
-        .resource_dir()
-        .map_err(|e| format!("Failed to get resource dir: {}", e))?;
+    // Try to get resource directory, but handle failure gracefully
+    let backend_path = match app_handle.path().resource_dir() {
+        Ok(resource_dir) => {
+            println!("✅ Resource directory found: {:?}", resource_dir);
+            
+            // List contents for debugging
+            if let Ok(entries) = std::fs::read_dir(&resource_dir) {
+                println!("Contents of resource directory:");
+                for entry in entries {
+                    if let Ok(entry) = entry {
+                        println!("  📁 {:?}", entry.path());
+                    }
+                }
+            }
+            
+            // Try multiple possible paths
+            let possible_paths = [
+                resource_dir.join("nse-analyzer"),
+                resource_dir.join("resource/nse-analyzer"),
+                resource_dir.join("resource").join("nse-analyzer"),
+            ];
+            
+            let mut found_path = None;
+            for path in &possible_paths {
+                println!("🔍 Checking: {:?} - exists: {}", path, path.exists());
+                if path.exists() {
+                    found_path = Some(path.clone());
+                    break;
+                }
+            }
+            
+            if let Some(path) = found_path {
+                path
+            } else {
+                return Err("Backend binary not found in any expected resource location".to_string());
+            }
+        },
+        Err(_) => {
+            println!("❌ Resource directory failed, trying alternative approaches...");
+            
+            // Fallback 1: Try to construct path from app bundle structure
+            if let Ok(app_config_dir) = app_handle.path().app_config_dir() {
+                println!("🔄 Trying app config dir approach: {:?}", app_config_dir);
+                
+                // Navigate to Resources from app bundle
+                if let Some(contents) = app_config_dir.parent()
+                    .and_then(|p| p.parent())
+                    .and_then(|p| p.parent()) {
+                    
+                    let resources_dir = contents.join("Resources");
+                    println!("🔄 Constructed Resources path: {:?}", resources_dir);
+                    
+                    let possible_paths = [
+                        resources_dir.join("nse-analyzer"),
+                        resources_dir.join("resource/nse-analyzer"),
+                        resources_dir.join("resource").join("nse-analyzer"),
+                    ];
+                    
+                    let mut found_path = None;
+                    for path in &possible_paths {
+                        println!("🔍 Checking constructed: {:?} - exists: {}", path, path.exists());
+                        if path.exists() {
+                            found_path = Some(path.clone());
+                            break;
+                        }
+                    }
+                    
+                    if let Some(path) = found_path {
+                        path
+                    } else {
+                        return Err("Backend binary not found via constructed path".to_string());
+                    }
+                } else {
+                    return Err("Could not construct path to Resources directory".to_string());
+                }
+            } else {
+                // Fallback 2: For testing, use absolute path to your backend
+                let absolute_backend = std::path::PathBuf::from("/Users/adityachaudhary/Desktop/nse-analyzer/backend/target/release/nse-analyzer");
+                println!("🔄 Using absolute path for testing: {:?}", absolute_backend);
+                
+                if absolute_backend.exists() {
+                    absolute_backend
+                } else {
+                    return Err("Backend binary not found at absolute path".to_string());
+                }
+            }
+        }
+    };
     
-    // Your backend binary name from nse-analyzer/backend/target/release/nse-analyzer
-    // let backend_path = resource_dir.join("nse-analyzer");
-    let backend_path = resource_dir.join("resource/nse-analyzer");
+    println!("✅ Using backend at: {:?}", backend_path);
+    println!("🚀 Starting backend with NSE_MODE=server NSE_PORT=3001");
     
     // Make sure the binary is executable on Unix systems
     #[cfg(unix)]
@@ -103,18 +188,46 @@ async fn start_backend(
 
     backend_process.start(&backend_path.to_string_lossy())?;
     
-    // Wait a moment for the backend to start
-    tokio::time::sleep(Duration::from_millis(2000)).await;
+    // Wait longer for the backend to start (backend might need time to initialize)
+    println!("⏳ Waiting for backend to start...");
+    tokio::time::sleep(Duration::from_millis(5000)).await;
     
     // Check if backend is responding
-    // match check_backend_health().await {
-    //     Ok(_) => Ok("Backend started successfully".to_string()),
-    //     Err(e) => {
-    //         backend_process.stop();
-    //         Err(format!("Backend started but not responding: {}", e))
-    //     }
-    // }
-    Ok("Backend started successfully".to_string())
+    match check_backend_health().await {
+        Ok(_) => {
+            println!("✅ Backend health check passed!");
+            Ok("Backend started successfully".to_string())
+        },
+        Err(e) => {
+            println!("❌ Backend health check failed: {}", e);
+            
+            // Don't stop the backend immediately - it might still be starting
+            println!("🔄 Backend might still be starting, checking port...");
+            
+            // Check if something is listening on port 3001
+            match tokio::process::Command::new("lsof")
+                .args(["-i", ":3001"])
+                .output()
+                .await 
+            {
+                Ok(output) => {
+                    if !output.stdout.is_empty() {
+                        println!("✅ Something is listening on port 3001");
+                        Ok("Backend started (port active, health check failed)".to_string())
+                    } else {
+                        println!("❌ Nothing listening on port 3001");
+                        backend_process.stop();
+                        Err(format!("Backend started but not responding: {}", e))
+                    }
+                },
+                Err(_) => {
+                    println!("❌ Could not check port status");
+                    backend_process.stop();
+                    Err(format!("Backend started but not responding: {}", e))
+                }
+            }
+        }
+    }
 }
 
 #[tauri::command]
