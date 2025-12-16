@@ -5,6 +5,7 @@ import {
   ContractInfoResponse,
   SingleAnalysisResponse,
   BatchAnalysisResponse,
+  FuturesDataResponse,
 } from '@/app/types/api';
 import { db, DB_KEYS } from '@/app/lib/db';
 
@@ -129,6 +130,47 @@ export const apiClient = {
     }
   },
 
+  // Futures Data
+  async getFuturesData(
+    symbol: string,
+    expiry: string,
+    forceRefresh = false
+  ): Promise<ApiResponse<FuturesDataResponse>> {
+    try {
+      const key = DB_KEYS.FUTURES_DATA(symbol, expiry);
+      
+      // Check if we should use cached data
+      if (!forceRefresh) {
+        const cachedData = await db.getData<FuturesDataResponse>(key);
+        if (cachedData) {
+          return {
+            success: true,
+            data: cachedData.data,
+            fromCache: true,
+            cachedAt: cachedData.timestamp,
+            lastUpdated: cachedData.lastUpdated
+          } as ApiResponse<FuturesDataResponse> & { fromCache: boolean; cachedAt: string; lastUpdated: number };
+        }
+      }
+
+      // Fetch from API
+      const response = await api.get(
+        `/api/futures-data?symbol=${encodeURIComponent(symbol)}&expiry=${encodeURIComponent(expiry)}`
+      );
+      const apiResponse: ApiResponse<FuturesDataResponse> = response.data;
+
+      // Store in database if successful
+      if (apiResponse.success && apiResponse.data) {
+        await db.storeData(key, apiResponse.data);
+      }
+
+      return apiResponse;
+    } catch (error) {
+      console.error('Error fetching futures data:', error);
+      throw error;
+    }
+  },
+
   // Batch Analysis
   async getBatchAnalysis(forceRefresh = false): Promise<ApiResponse<BatchAnalysisResponse>> {
     try {
@@ -173,6 +215,10 @@ export const apiClient = {
 
   async hasSingleAnalysis(symbol: string, expiry: string): Promise<boolean> {
     return await db.hasData(DB_KEYS.SINGLE_ANALYSIS(symbol, expiry));
+  },
+
+  async hasFuturesData(symbol: string, expiry: string): Promise<boolean> {
+    return await db.hasData(DB_KEYS.FUTURES_DATA(symbol, expiry));
   },
 
   async hasBatchAnalysis(): Promise<boolean> {

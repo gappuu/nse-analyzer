@@ -115,3 +115,25 @@ export interface CacheInfo {
   age?: string;
   lastUpdated?: number;
 }
+
+// Types for futures data
+export interface FuturesDataResponse {
+  success: boolean;
+  data: {
+    data: Array<{
+      pchange: number;
+      pchangeinOpenInterest: number;
+      underlyingValue: number;
+    }>;
+    timestamp: string;
+  };
+  error: string | null;
+  processing_time_ms: number;
+}
+
+export interface FuturesAnalysis {
+  action: string;
+  color: string;
+  underlyingValue: number;
+  timestamp: string;
+}

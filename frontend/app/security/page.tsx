@@ -16,7 +16,8 @@ import {
 } from 'lucide-react';
 import { apiClient, handleApiError, getAlertBadgeClass, formatCurrency, getMoneyStatusColor } from '@/app/lib/api';
 import { db } from '@/app/lib/db';
-import { ContractInfoResponse, SingleAnalysisResponse, DataWithAge } from '@/app/types/api';
+import { ContractInfoResponse, SingleAnalysisResponse, DataWithAge,FuturesAnalysis, FuturesDataResponse } from '@/app/types/api';
+
 
 // Separate component that uses useSearchParams - wrapped in Suspense
 function SecurityPageContent() {
@@ -26,10 +27,12 @@ function SecurityPageContent() {
   const [contractData, setContractData] = useState<DataWithAge<ContractInfoResponse> | null>(null);
   const [selectedExpiry, setSelectedExpiry] = useState<string | null>(null);
   const [analysisData, setAnalysisData] = useState<DataWithAge<SingleAnalysisResponse> | null>(null);
+  const [futuresAnalysis, setFuturesAnalysis] = useState<FuturesAnalysis | null>(null);
   const [loading, setLoading] = useState(true);
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [analysisFetching, setAnalysisFetching] = useState(false);
+  const [futuresLoading, setFuturesLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(Date.now());
 
@@ -54,6 +57,102 @@ function SecurityPageContent() {
       return db.getDataAge(dataTime, currentTime);
     } catch (error) {
       return 'unknown';
+    }
+  };
+
+  // Function to determine futures expiry from selected expiry
+  const getFuturesExpiry = (selectedExpiry: string, expiryDates: string[]): string => {
+    if (!selectedExpiry || !expiryDates.length) return selectedExpiry;
+    
+    try {
+      const selectedDate = new Date(selectedExpiry);
+      const selectedMonth = selectedDate.getMonth();
+      const selectedYear = selectedDate.getFullYear();
+      
+      // Find all expiries in the same month and year
+      const sameMonthExpiries = expiryDates.filter(expiry => {
+        const expiryDate = new Date(expiry);
+        return expiryDate.getMonth() === selectedMonth && 
+               expiryDate.getFullYear() === selectedYear;
+      });
+      
+      // If multiple expiries in same month, return the last one
+      if (sameMonthExpiries.length > 1) {
+        return sameMonthExpiries.sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
+      }
+      
+      return selectedExpiry;
+    } catch (error) {
+      console.error('Error determining futures expiry:', error);
+      return selectedExpiry;
+    }
+  };
+
+  // Function to fetch futures data and analyze action
+  const fetchFuturesAnalysis = async (expiry: string) => {
+    if (!symbol || !expiry) return;
+    
+    try {
+      setFuturesLoading(true);
+      
+      const futuresExpiry = getFuturesExpiry(expiry, contractData?.data.expiry_dates || []);
+      const response = await fetch(`/api/futures-data?symbol=${symbol}&expiry=${futuresExpiry}`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const futuresData: FuturesDataResponse = await response.json();
+      
+      if (futuresData.success && futuresData.data.data.length > 0) {
+        const data = futuresData.data.data[0];
+        const { pchange, pchangeinOpenInterest, underlyingValue } = data;
+        
+        let action = '';
+        let color = '';
+        
+        if (pchange > 0 && pchangeinOpenInterest > 0) {
+          action = 'Long Buildup';
+          color = 'text-green-400';
+        } else if (pchange > 0 && pchangeinOpenInterest < 0) {
+          action = 'Short Covering';
+          color = 'text-gray-300';
+        } else if (pchange < 0 && pchangeinOpenInterest > 0) {
+          action = 'Short Buildup';
+          color = 'text-red-400';
+        } else if (pchange < 0 && pchangeinOpenInterest < 0) {
+          action = 'Long Covering';
+          color = 'text-gray-300';
+        } else {
+          action = 'Neutral';
+          color = 'text-gray-400';
+        }
+        
+        setFuturesAnalysis({
+          action,
+          color,
+          underlyingValue,
+          timestamp: futuresData.data.timestamp
+        });
+      } else {
+        console.error('No futures data available or API error:', futuresData.error);
+        setFuturesAnalysis({
+          action: 'No Data',
+          color: 'text-gray-500',
+          underlyingValue: 0,
+          timestamp: ''
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching futures data:', error);
+      setFuturesAnalysis({
+        action: 'Error',
+        color: 'text-red-400',
+        underlyingValue: 0,
+        timestamp: ''
+      });
+    } finally {
+      setFuturesLoading(false);
     }
   };
 
@@ -139,6 +238,9 @@ function SecurityPageContent() {
           fromCache: response.fromCache || false
         };
         setAnalysisData(dataWithAge);
+        
+        // Fetch futures analysis when analysis data is loaded
+        await fetchFuturesAnalysis(expiry);
       } else {
         setError(response.error || 'Failed to fetch analysis');
       }
@@ -153,6 +255,7 @@ function SecurityPageContent() {
   const handleExpirySelect = (expiry: string) => {
     setSelectedExpiry(expiry);
     setAnalysisData(null);
+    setFuturesAnalysis(null);
     fetchAnalysis(expiry);
   };
 
@@ -508,9 +611,20 @@ function SecurityPageContent() {
                             <div className="font-medium text-gray-100">
                               FUTURES
                             </div>
-                              <div className="text-sm text-gray-400">
-                                Short Covering
-                              </div>
+                            <div className="text-sm">
+                              {futuresLoading ? (
+                                <div className="flex items-center justify-center">
+                                  <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                                  <span className="text-gray-400">Loading...</span>
+                                </div>
+                              ) : futuresAnalysis ? (
+                                <span className={futuresAnalysis.color}>
+                                  {futuresAnalysis.action}
+                                </span>
+                              ) : (
+                                <span className="text-gray-400">No Data</span>
+                              )}
+                            </div>
                           </td>
                           <td className="px-6 py-4 text-right">
                             <div className="font-medium text-gray-100">

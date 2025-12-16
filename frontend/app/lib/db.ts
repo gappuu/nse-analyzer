@@ -91,6 +91,7 @@ export const DB_KEYS = {
   SECURITIES_LIST: 'securities_list',
   CONTRACT_INFO: (symbol: string) => `contract_info:${symbol}`,
   SINGLE_ANALYSIS: (symbol: string, expiry: string) => `single_analysis:${symbol}:${expiry}`,
+  FUTURES_DATA: (symbol: string, expiry: string) => `futures_data:${symbol}:${expiry}`,
   BATCH_ANALYSIS: 'batch_analysis'
 } as const;
 
