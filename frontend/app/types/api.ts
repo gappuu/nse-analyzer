@@ -131,3 +131,12 @@ export interface FuturesAnalysis {
   underlyingValue: number;
   timestamp: string;
 }
+
+
+export interface HistoricalDataPoint {
+  FH_TIMESTAMP: string;
+  FH_UNDERLYING_VALUE: number;
+  FH_OPEN_INT: number;
+  FH_CHANGE_IN_OI: number;
+  FH_SETTLE_PRICE: number;
+}

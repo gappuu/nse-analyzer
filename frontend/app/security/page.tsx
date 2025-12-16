@@ -14,10 +14,18 @@ import {
   RefreshCw,
   Database
 } from 'lucide-react';
-import { apiClient, handleApiError, getAlertBadgeClass, formatCurrency, getMoneyStatusColor } from '@/app/lib/api';
+import { 
+  apiClient, 
+  handleApiError, 
+  getAlertBadgeClass, 
+  formatCurrency, 
+  getMoneyStatusColor, 
+  get20DaysAgo, 
+  getToday 
+} from '@/app/lib/api';
 import { db } from '@/app/lib/db';
-import { ContractInfoResponse, SingleAnalysisResponse, DataWithAge,FuturesAnalysis } from '@/app/types/api';
-
+import { ContractInfoResponse, SingleAnalysisResponse, DataWithAge, FuturesAnalysis, HistoricalDataPoint } from '@/app/types/api';
+import HistoricalDataModal from '@/app/components/HistoricalDataModal';
 
 // Separate component that uses useSearchParams - wrapped in Suspense
 function SecurityPageContent() {
@@ -35,6 +43,13 @@ function SecurityPageContent() {
   const [futuresLoading, setFuturesLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(Date.now());
+
+  // Historical data modal state
+  const [historicalModalOpen, setHistoricalModalOpen] = useState(false);
+  const [historicalData, setHistoricalData] = useState<HistoricalDataPoint[] | null>(null);
+  const [historicalLoading, setHistoricalLoading] = useState(false);
+  const [historicalError, setHistoricalError] = useState<string | null>(null);
+  const [historicalTitle, setHistoricalTitle] = useState('');
 
   // Real-time duration update effect
   useEffect(() => {
@@ -56,7 +71,7 @@ function SecurityPageContent() {
       if (!timestampString) return 'unknown';
       const dataTime = new Date(timestampString).getTime();
       return db.getDataAge(dataTime, currentTime);
-    } catch (error) {
+    } catch {
       return 'unknown';
     }
   };
@@ -86,6 +101,57 @@ function SecurityPageContent() {
     } catch (error) {
       console.error('Error determining futures expiry:', error);
       return selectedExpiry;
+    }
+  };
+
+  // Function to fetch historical data
+  const fetchHistoricalData = async (
+    instrumentType: 'FUTURES' | 'OPTIONS',
+    strikePrice?: string,
+    optionType?: 'CE' | 'PE'
+  ) => {
+    if (!symbol || !selectedExpiry || !contractData) return;
+
+    try {
+      setHistoricalLoading(true);
+      setHistoricalError(null);
+      setHistoricalModalOpen(true);
+
+      const futuresExpiry = getFuturesExpiry(selectedExpiry, contractData.data.expiry_dates);
+      
+      // Set modal title
+      if (instrumentType === 'FUTURES') {
+        setHistoricalTitle(`${symbol} Futures Historical Data - ${futuresExpiry}`);
+      } else {
+        setHistoricalTitle(`${symbol} ${strikePrice} ${optionType} Historical Data - ${futuresExpiry}`);
+      }
+
+      const params: any = {
+        symbol,
+        instrument_type: instrumentType,
+        expiry: futuresExpiry,
+        from_date: get20DaysAgo(),
+        to_date: getToday(),
+      };
+
+      if (instrumentType === 'OPTIONS' && strikePrice && optionType) {
+        params.strike_price = strikePrice;
+        params.option_type = optionType;
+      }
+
+      const response = await apiClient.getDerivativesHistorical(params);
+
+      if (response.success && response.data && response.data.data) {
+        setHistoricalData(response.data.data);
+      } else {
+        setHistoricalError(response.error || 'Failed to fetch historical data');
+        setHistoricalData([]);
+      }
+    } catch (err) {
+      setHistoricalError(handleApiError(err));
+      setHistoricalData([]);
+    } finally {
+      setHistoricalLoading(false);
     }
   };
 
@@ -324,472 +390,494 @@ function SecurityPageContent() {
   }
 
   return (
-    <div className="min-h-screen py-8 px-4">
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <header className="mb-8">
-          <div className="flex items-center justify-between mb-4">
-            <Link href="/" className="inline-flex items-center text-gray-400 hover:text-nse-accent transition-colors">
-              <ArrowLeft className="w-4 h-4 mr-2" />
-              Back to Securities
-            </Link>
+    <>
+      <div className="min-h-screen py-8 px-4">
+        <div className="max-w-7xl mx-auto">
+          {/* Header */}
+          <header className="mb-8">
+            <div className="flex items-center justify-between mb-4">
+              <Link href="/" className="inline-flex items-center text-gray-400 hover:text-nse-accent transition-colors">
+                <ArrowLeft className="w-4 h-4 mr-2" />
+                Back to Securities
+              </Link>
 
-            <Link href="/batch/" className="inline-flex items-center text-gray-400 hover:text-nse-accent transition-colors">
-              Go to Batch
-            </Link>
-          </div>
-          
-          <div className="flex items-center gap-4 mb-6">
-            <h1 className="text-4xl font-display font-bold text-gradient">
-              {symbol}
-            </h1>
-            {contractData && (
-              <span className="px-3 py-1 bg-nse-surface rounded-full text-sm text-gray-300">
-                {contractData.data.expiry_dates.length} Expiries Available
-              </span>
-            )}
-          </div>
-
-          {/* Contract Info Age and Fetch Controls */}
-          {contractData && (
-            <div className="card-glow rounded-lg p-4 mb-6">
-              <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-                <div className="flex items-center gap-3 text-sm">
-                  <div className="flex items-center gap-2">
-                    {contractData.fromCache ? (
-                      <Database className="w-4 h-4 text-blue-400" />
-                    ) : (
-                      <Clock className="w-4 h-4 text-green-400" />
-                    )}
-                    <span className="text-gray-400">
-                      Contract info {contractData.fromCache ? 'from cache' : 'freshly fetched'}
-                    </span>
-                  </div>
-                  <span className="text-gray-500">•</span>
-                  <div className="flex items-center gap-2">
-                    <Clock className="w-4 h-4 text-gray-500" />
-                    <span className="text-gray-400">Updated {getRealTimeAge(contractData.lastUpdated)}</span>
-                  </div>
-                </div>
-                
-                <button
-                  onClick={handleFetchContractInfo}
-                  disabled={fetching}
-                  className="btn-secondary inline-flex items-center text-sm"
-                >
-                  {fetching ? (
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  ) : (
-                    <RefreshCw className="w-4 h-4 mr-2" />
-                  )}
-                  {fetching ? 'Fetching...' : 'Fetch Expiry'}
-                </button>
-              </div>
-            </div>
-          )}
-        </header>
-
-        {/* Expiry Selection */}
-        {contractData && (
-          <section className="card-glow rounded-lg p-6 mb-8">
-            <div className="flex items-center gap-4 mb-4">
-              <Calendar className="w-5 h-5 text-nse-accent" />
-              <h2 className="text-xl font-semibold text-gray-100">Select Expiry Date</h2>
+              <Link href="/batch/" className="inline-flex items-center text-gray-400 hover:text-nse-accent transition-colors">
+                Go to Batch
+              </Link>
             </div>
             
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
-              {contractData.data.expiry_dates.map((expiry) => (
-                <button
-                  key={expiry}
-                  onClick={() => handleExpirySelect(expiry)}
-                  disabled={analysisLoading || analysisFetching}
-                  className={`p-3 rounded-lg font-medium transition-all ${
-                    selectedExpiry === expiry
-                      ? 'bg-nse-accent text-white shadow-lg'
-                      : 'bg-slate-700 text-gray-300 hover:bg-slate-600'
-                  } ${(analysisLoading || analysisFetching) ? 'opacity-50 cursor-not-allowed' : ''}`}
-                >
-                  {expiry}
-                </button>
-              ))}
+            <div className="flex items-center gap-4 mb-6">
+              <h1 className="text-4xl font-display font-bold text-gradient">
+                {symbol}
+              </h1>
+              {contractData && (
+                <span className="px-3 py-1 bg-nse-surface rounded-full text-sm text-gray-300">
+                  {contractData.data.expiry_dates.length} Expiries Available
+                </span>
+              )}
             </div>
-          </section>
-        )}
 
-        {/* Analysis Results */}
-        {selectedExpiry && (
-          <section className="space-y-6">
-            {/* Analysis Data Age and Fetch Controls */}
-            {analysisData && (
-              <div className="card-glow rounded-lg p-4">
+            {/* Contract Info Age and Fetch Controls */}
+            {contractData && (
+              <div className="card-glow rounded-lg p-4 mb-6">
                 <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
                   <div className="flex items-center gap-3 text-sm">
                     <div className="flex items-center gap-2">
-                      {analysisData.fromCache ? (
+                      {contractData.fromCache ? (
                         <Database className="w-4 h-4 text-blue-400" />
                       ) : (
                         <Clock className="w-4 h-4 text-green-400" />
                       )}
                       <span className="text-gray-400">
-                        Analysis {analysisData.fromCache ? 'from cache' : 'freshly fetched'} for {selectedExpiry}
+                        Contract info {contractData.fromCache ? 'from cache' : 'freshly fetched'}
                       </span>
                     </div>
                     <span className="text-gray-500">•</span>
                     <div className="flex items-center gap-2">
                       <Clock className="w-4 h-4 text-gray-500" />
-                      <span className="text-gray-400">Updated {getRealTimeAge(analysisData.lastUpdated)}</span>
+                      <span className="text-gray-400">Updated {getRealTimeAge(contractData.lastUpdated)}</span>
                     </div>
                   </div>
                   
                   <button
-                    onClick={handleFetchAnalysis}
-                    disabled={analysisFetching}
+                    onClick={handleFetchContractInfo}
+                    disabled={fetching}
                     className="btn-secondary inline-flex items-center text-sm"
                   >
-                    {analysisFetching ? (
+                    {fetching ? (
                       <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                     ) : (
                       <RefreshCw className="w-4 h-4 mr-2" />
                     )}
-                    {analysisFetching ? 'Fetching...' : 'Fetch Data'}
+                    {fetching ? 'Fetching...' : 'Fetch Expiry'}
                   </button>
                 </div>
               </div>
             )}
+          </header>
 
-            {(analysisLoading || analysisFetching) ? (
-              <div className="card-glow rounded-lg p-12 text-center">
-                <Loader2 className="w-8 h-8 animate-spin mx-auto text-nse-accent mb-4" />
-                <p className="text-gray-400">
-                  {analysisFetching ? 'Fetching latest analysis' : 'Loading cached analysis'} for {symbol} ({selectedExpiry})...
-                </p>
+          {/* Expiry Selection */}
+          {contractData && (
+            <section className="card-glow rounded-lg p-6 mb-8">
+              <div className="flex items-center gap-4 mb-4">
+                <Calendar className="w-5 h-5 text-nse-accent" />
+                <h2 className="text-xl font-semibold text-gray-100">Select Expiry Date</h2>
               </div>
-            ) : analysisData ? (
-              <>
-                {/* Summary Cards */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                  <div className="card-glow rounded-lg p-6">
-                    <div className="flex items-center gap-3 mb-2">
-                      <span className="text-sm text-gray-400">Underlying Value</span>
-                    </div>
-                    <p className="text-2xl font-bold text-gray-100">
-                      {formatCurrency(analysisData.data.underlying_value)}
-                    </p>
-                    <p className="text-sm text-gray-500 mt-1">as of {analysisData.data.timestamp}</p>
-                  </div>
+              
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
+                {contractData.data.expiry_dates.map((expiry) => (
+                  <button
+                    key={expiry}
+                    onClick={() => handleExpirySelect(expiry)}
+                    disabled={analysisLoading || analysisFetching}
+                    className={`p-3 rounded-lg font-medium transition-all ${
+                      selectedExpiry === expiry
+                        ? 'bg-nse-accent text-white shadow-lg'
+                        : 'bg-slate-700 text-gray-300 hover:bg-slate-600'
+                    } ${(analysisLoading || analysisFetching) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  >
+                    {expiry}
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
 
-                  <div className="card-glow rounded-lg p-6">
-                    <div className="flex items-center gap-3 mb-2">
-                      <BarChart3 className="w-5 h-5 text-nse-accent" />
-                      <span className="text-sm text-gray-400">Spread</span>
+          {/* Analysis Results */}
+          {selectedExpiry && (
+            <section className="space-y-6">
+              {/* Analysis Data Age and Fetch Controls */}
+              {analysisData && (
+                <div className="card-glow rounded-lg p-4">
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+                    <div className="flex items-center gap-3 text-sm">
+                      <div className="flex items-center gap-2">
+                        {analysisData.fromCache ? (
+                          <Database className="w-4 h-4 text-blue-400" />
+                        ) : (
+                          <Clock className="w-4 h-4 text-green-400" />
+                        )}
+                        <span className="text-gray-400">
+                          Analysis {analysisData.fromCache ? 'from cache' : 'freshly fetched'} for {selectedExpiry}
+                        </span>
+                      </div>
+                      <span className="text-gray-500">•</span>
+                      <div className="flex items-center gap-2">
+                        <Clock className="w-4 h-4 text-gray-500" />
+                        <span className="text-gray-400">Updated {getRealTimeAge(analysisData.lastUpdated)}</span>
+                      </div>
                     </div>
-                    <p className="text-2xl font-bold text-gray-100">
-                      {analysisData.data.spread.toFixed(2)}
-                    </p>
-                    <p className="text-sm text-gray-500 mt-1">between strikes</p>
-                  </div>
-
-                  <div className="card-glow rounded-lg p-6">
-                    <div className="flex items-center gap-3 mb-2">
-                      <Clock className="w-5 h-5 text-nse-accent" />
-                      <span className="text-sm text-gray-400">Days to Expiry</span>
-                    </div>
-                    <p className="text-2xl font-bold text-gray-100">
-                      {analysisData.data.days_to_expiry}
-                    </p>
-                    <p className="text-sm text-gray-500 mt-1">trading days left</p>
-                  </div>
-
-                  <div className="card-glow rounded-lg p-6">
-                    <div className="flex items-center gap-3 mb-2">
-                      <TrendingUp className="w-5 h-5 text-nse-accent" />
-                      <span className="text-sm text-gray-400">Total OI</span>
-                    </div>
-                    <p className="text-2xl font-bold text-gray-100">
-                      CE : {Number(analysisData.data.ce_oi).toLocaleString("en-IN", {maximumFractionDigits: 0,})}
-                    </p>
-                    <p className="text-2xl font-bold text-gray-100">
-                      PE : {Number(analysisData.data.pe_oi).toLocaleString("en-IN", {maximumFractionDigits: 0,})}
-                    </p>
+                    
+                    <button
+                      onClick={handleFetchAnalysis}
+                      disabled={analysisFetching}
+                      className="btn-secondary inline-flex items-center text-sm"
+                    >
+                      {analysisFetching ? (
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      ) : (
+                        <RefreshCw className="w-4 h-4 mr-2" />
+                      )}
+                      {analysisFetching ? 'Fetching...' : 'Fetch Data'}
+                    </button>
                   </div>
                 </div>
+              )}
 
-                {/* Alerts */}
-                {analysisData.data.alerts && analysisData.data.alerts.alerts.length > 0 && (
-                  <div className="card-glow rounded-lg p-6">
-                    <div className="flex items-center gap-3 mb-4">
-                      <AlertCircle className="w-5 h-5 text-nse-warning" />
-                      <h2 className="text-xl font-semibold text-gray-100">
-                        Active Alerts ({analysisData.data.alerts.alerts.length}) 
-                      </h2>
-                    </div>
-                    
-                    <div className="space-y-4">
-                      {analysisData.data.alerts.alerts.map((alert, index) => (
-                        <div key={index} className="bg-slate-800/50 rounded-lg p-4 border border-gray-700/50">
-                          <div className="flex items-start justify-between mb-3">
-                            <div className="flex items-center gap-3">
-                              <span className={getAlertBadgeClass(alert.alert_type)}>
-                                {alert.alert_type.replace('_', ' ')}
-                              </span>
-                              <span className={`font-medium ${
-                                (alert.option_type === 'CE' && alert.alert_type === 'HUGE_OI_INCREASE') ||
-                                (alert.option_type === 'PE' && alert.alert_type === 'HUGE_OI_DECREASE')
-                                  ? 'text-red-400': 'text-green-400'}`}>
-                              {alert.option_type}
-                            </span>
-                              <span className="text-gray-400">
-                                Strike: ₹{alert.strike_price} 
-                              </span>
-                              <span >
-                                Expiry : {alert.expiry_date}
-                              </span>
-                            </div>
-                          </div>
-                          
-                          <p className="text-gray-300 mb-3">{alert.description}</p>
-                          
-                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                            <div>
-                              <span className="text-gray-500">Time Value:</span>
-                              <p className="text-gray-200 font-medium">₹{alert.values.time_val.toFixed(2)}</p>
-                            </div>
-                            <div>
-                              <span className="text-gray-500">The Money:</span>
-                              <p className="text-gray-200 font-medium">{alert.values.the_money}</p>
-                            </div>
-                            {alert.values.last_price && (
-                              <div>
-                                <span className="text-gray-500">Last Price:</span>
-                                <p className="text-gray-200 font-medium">₹{alert.values.last_price.toFixed(2)}</p>
-                              </div>
-                            )}
-                            {alert.values.pchange_in_oi && (
-                              <div>
-                                <span className="text-gray-500">OI Change:</span>
-                                <p className={`font-medium ${
-                                  alert.values.pchange_in_oi > 0 ? 'text-green-400' : 'text-red-400'
-                                }`}>
-                                  {alert.values.pchange_in_oi.toFixed(2)}%
-                                </p>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Summary Table - Separate from Options Chain */}
-                <div className="card-glow rounded-t-lg overflow-hidden" style={{marginBottom:0}} >
-                  <div className="overflow-x-auto">
-                    
-                    <table className="w-full">
-                      <tbody>
-                        {/* Row 1: Symbol, Futures, Fetch Timestamp */}
-                        <tr className="border-b border-gray-700/50">
-                          <td className=" px-6 py-4 ">
-                            <div className=" text-gradient text-xl font-bold ">
-                              {symbol}
-                            </div>
-                              <div className=" font-bold ">
-                                 ₹ {analysisData.data.underlying_value.toLocaleString("en-IN")}
-                              </div>
-                              <div className="text-l"><sub>{analysisData.data.timestamp} : {getDataTimestampAge(analysisData.data.timestamp)}</sub></div>
-                          </td>
-
-                          <td className="px-6 py-4 text-l">
-                            <div className="font-bold">
-                              FUTURES : 
-                                <span className="text-l">
-                                  {futuresLoading ? (
-                                    <div className="flex items-center justify-center">
-                                      <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                                      <span className="text-gray-400">Loading...</span>
-                                    </div>
-                                  ) : futuresAnalysis ? (
-                                    <span className={futuresAnalysis.color}>
-                                      {futuresAnalysis.action}
-                                    </span>
-                                  ) : (
-                                    <span className="text-gray-400">No Data</span>
-                                  )}
-                              </span>
-
-                            </div>
-                              <div>
-                                 ₹ {futuresAnalysis?.underlyingValue.toLocaleString("en-IN")}
-                              </div>
-                              <div><sub>{futuresAnalysis?.timestamp} : {getDataTimestampAge(futuresAnalysis?.timestamp)}</sub></div>
-                          </td>
-
-                          <td className="px-6 py-4 text-right" colSpan={2}>
-                            <div className="font-medium text-gray-100">
-                              Fetched {getRealTimeAge(analysisData.lastUpdated)}
-                            </div>
-                                <div className="text-sm text-gray-400">
-                                 <button
-                                  onClick={handleFetchAnalysis}
-                                  disabled={analysisFetching}
-                                  className="btn-outline-primary inline-flex items-center text-sm">
-                                  {analysisFetching ? (
-                                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                                  ) : (
-                                    <RefreshCw className="w-4 h-4 mr-2" />
-                                  )}
-                                  {analysisFetching ? 'Fetching...' : 'Fetch Latest'}
-                              </button>
-                                </div>
-                          </td>
-                        </tr>
-                        
-                        {/* Row 2: CE OI, Expiry, PE OI */}
-                        <tr>
-                          <td className="px-6 py-4 text-center">
-                            <div className="font-bold text-lg ">
-                              Total CE : {analysisData.data.ce_oi.toLocaleString("en-IN")}
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 text-center" colSpan={2}>
-                            <div className="font-bold text-lg text-nse-accent">
-                              Expiry : {selectedExpiry} <sub>({analysisData.data.days_to_expiry} days left)</sub>
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 text-center">
-                            <div className="font-bold text-lg ">
-                              Total PE : {analysisData.data.pe_oi.toLocaleString("en-IN")}
-                            </div>
-                          </td>
-                        </tr>
-                      </tbody>
-                    </table>
-                    
-                    
-
-                  </div>
+              {(analysisLoading || analysisFetching) ? (
+                <div className="card-glow rounded-lg p-12 text-center">
+                  <Loader2 className="w-8 h-8 animate-spin mx-auto text-nse-accent mb-4" />
+                  <p className="text-gray-400">
+                    {analysisFetching ? 'Fetching latest analysis' : 'Loading cached analysis'} for {symbol} ({selectedExpiry})...
+                  </p>
                 </div>
+              ) : analysisData ? (
+                <>
+                  {/* Summary Cards */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                    <div className="card-glow rounded-lg p-6">
+                      <div className="flex items-center gap-3 mb-2">
+                        <span className="text-sm text-gray-400">Underlying Value</span>
+                      </div>
+                      <p className="text-2xl font-bold text-gray-100">
+                        {formatCurrency(analysisData.data.underlying_value)}
+                      </p>
+                      <p className="text-sm text-gray-500 mt-1">as of {analysisData.data.timestamp}</p>
+                    </div>
 
-                {/* Options Chain Table - Separate table, no gap */}
-                <div className="card-glow rounded-b-lg overflow-hidden -mt-0">
-                  <div className="overflow-x-auto">
-                    <table className="data-table">
-                      <thead>
-                        <tr>
-                          <th>CE OI</th>
-                          <th>CE %OI</th>
-                          <th>CE Money</th>
-                          <th>CE %LTP</th>
-                          <th>CE LTP</th>
-                          <th>CE Tambu</th>
-                          <th>STRIKE</th>
-                          <th>PE Tambu</th>
-                          <th>PE LTP</th>
-                          <th>PE %LTP</th>
-                          <th>PE Money</th>
-                          <th>PE %OI</th>
-                          <th>PE OI</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {analysisData.data.processed_data
-                          .sort((a, b) => (b.strikePrice || 0) - (a.strikePrice || 0))
-                          .map((option, index) => {
-                            const ceOIRank = getOIRankStyling(option.CE?.oiRank);
-                            const peOIRank = getOIRankStyling(option.PE?.oiRank);
+                    <div className="card-glow rounded-lg p-6">
+                      <div className="flex items-center gap-3 mb-2">
+                        <BarChart3 className="w-5 h-5 text-nse-accent" />
+                        <span className="text-sm text-gray-400">Spread</span>
+                      </div>
+                      <p className="text-2xl font-bold text-gray-100">
+                        {analysisData.data.spread.toFixed(2)}
+                      </p>
+                      <p className="text-sm text-gray-500 mt-1">between strikes</p>
+                    </div>
+
+                    <div className="card-glow rounded-lg p-6">
+                      <div className="flex items-center gap-3 mb-2">
+                        <Clock className="w-5 h-5 text-nse-accent" />
+                        <span className="text-sm text-gray-400">Days to Expiry</span>
+                      </div>
+                      <p className="text-2xl font-bold text-gray-100">
+                        {analysisData.data.days_to_expiry}
+                      </p>
+                      <p className="text-sm text-gray-500 mt-1">trading days left</p>
+                    </div>
+
+                    <div className="card-glow rounded-lg p-6">
+                      <div className="flex items-center gap-3 mb-2">
+                        <TrendingUp className="w-5 h-5 text-nse-accent" />
+                        <span className="text-sm text-gray-400">Total OI</span>
+                      </div>
+                      <p className="text-2xl font-bold text-gray-100">
+                        CE : {Number(analysisData.data.ce_oi).toLocaleString("en-IN", {maximumFractionDigits: 0,})}
+                      </p>
+                      <p className="text-2xl font-bold text-gray-100">
+                        PE : {Number(analysisData.data.pe_oi).toLocaleString("en-IN", {maximumFractionDigits: 0,})}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Alerts */}
+                  {analysisData.data.alerts && analysisData.data.alerts.alerts.length > 0 && (
+                    <div className="card-glow rounded-lg p-6">
+                      <div className="flex items-center gap-3 mb-4">
+                        <AlertCircle className="w-5 h-5 text-nse-warning" />
+                        <h2 className="text-xl font-semibold text-gray-100">
+                          Active Alerts ({analysisData.data.alerts.alerts.length}) 
+                        </h2>
+                      </div>
+                      
+                      <div className="space-y-4">
+                        {analysisData.data.alerts.alerts.map((alert, index) => (
+                          <div key={index} className="bg-slate-800/50 rounded-lg p-4 border border-gray-700/50">
+                            <div className="flex items-start justify-between mb-3">
+                              <div className="flex items-center gap-3">
+                                <span className={getAlertBadgeClass(alert.alert_type)}>
+                                  {alert.alert_type.replace('_', ' ')}
+                                </span>
+                                <span className={`font-medium ${
+                                  (alert.option_type === 'CE' && alert.alert_type === 'HUGE_OI_INCREASE') ||
+                                  (alert.option_type === 'PE' && alert.alert_type === 'HUGE_OI_DECREASE')
+                                    ? 'text-red-400': 'text-green-400'}`}>
+                                {alert.option_type}
+                              </span>
+                                <span className="text-gray-400">
+                                  Strike: ₹{alert.strike_price} 
+                                </span>
+                                <span >
+                                  Expiry : {alert.expiry_date}
+                                </span>
+                              </div>
+                            </div>
                             
-                            return (
-                              <tr key={index}>
-                                {/* CE Data */}
-                                <td className={`${option.CE?.openInterest ? ceOIRank.className : 'text-gray-400'}`}>
-                                  <div>
-                                    {option.CE?.openInterest != null ? Math.trunc(Number(option.CE.openInterest)) : '-'}
-                                    {ceOIRank.showRank && (
-                                      <sup className="ml-1 text-xs ">
-                                        {option.CE?.oiRank}
-                                      </sup>
-                                    )}
-                                  </div>
-                                </td>
-                                <td className={option.CE?.pchangeinOpenInterest ? 
-                                  (option.CE.pchangeinOpenInterest > 0 ? 'pchange-positive' : 'pchange-negative') : 'pchange-neutral'}>
-                                  {option.CE?.pchangeinOpenInterest ? 
-                                    `${option.CE.pchangeinOpenInterest > 0 ? '+' : ''}${option.CE.pchangeinOpenInterest.toFixed(1)}%` : '0'}
-                                </td>
-                                <td className={option.CE ? getMoneyStatusColor(option.CE.the_money) : 'text-gray-400'}>
-                                  {option.CE?.the_money || '-'}
-                                </td>
-                                <td className={option.CE?.pchange ? 
-                                  (option.CE.pchange > 0 ? 'pchange-positive' : 'pchange-negative') : 'pchange-neutral'}>
-                                  {option.CE?.pchange ? 
-                                    `${option.CE.pchange > 0 ? '+' : ''}${option.CE.pchange.toFixed(1)}%` : '-'}
-                                </td>
-                                <td className="option-ce">
-                                  {option.CE?.lastPrice ? `₹${option.CE.lastPrice.toFixed(2)}` : '-'}
-                                </td>
-                                <td className="text-gray-300">
-                                  {option.CE?.tambu || '-'}
-                                </td>
-                                
-                                {/* Strike Price */}
-                                <td className={`font-bold text-center ${ option.CE ? getMoneyStatusColor(option.CE.the_money) : ""}`} style={{ backgroundColor: "rgba(51, 65, 85, 0.5)" }}> 
-                                  {option.strikePrice}
-                                </td>
-                                
-                                {/* PE Data */}
-                                <td className="text-gray-300">
-                                  {option.PE?.tambu || '-'}
-                                </td>
-                                <td className="option-pe">
-                                  {option.PE?.lastPrice ? `₹${option.PE.lastPrice.toFixed(2)}` : '-'}
-                                </td>
-                                <td className={option.PE?.pchange ? 
-                                  (option.PE.pchange > 0 ? 'pchange-positive' : 'pchange-negative') : 'pchange-neutral'}>
-                                  {option.PE?.pchange ? 
-                                    `${option.PE.pchange > 0 ? '+' : ''}${option.PE.pchange.toFixed(1)}%` : '-'}
-                                </td>
-                                <td className={option.PE ? getMoneyStatusColor(option.PE.the_money) : 'text-gray-400'}>
-                                  {option.PE?.the_money || '-'}
-                                </td>
-                                <td className={option.PE?.pchangeinOpenInterest ? 
-                                  (option.PE.pchangeinOpenInterest > 0 ? 'pchange-positive' : 'pchange-negative') : 'pchange-neutral'}>
-                                  {option.PE?.pchangeinOpenInterest ? 
-                                    `${option.PE.pchangeinOpenInterest > 0 ? '+' : ''}${option.PE.pchangeinOpenInterest.toFixed(1)}%` : '0'}
-                                </td>
-                                <td className={`${option.PE?.openInterest ? peOIRank.className : 'text-gray-400'}`}>
-                                  <div>
-                                    {option.PE?.openInterest != null ? Math.trunc(Number(option.PE.openInterest)) : '-'}
-                                    {peOIRank.showRank && (
-                                      <sup className="ml-1 text-xs">
-                                        {option.PE?.oiRank}
-                                      </sup>
-                                    )}
-                                  </div>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
+                            <p className="text-gray-300 mb-3">{alert.description}</p>
+                            
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                              <div>
+                                <span className="text-gray-500">Time Value:</span>
+                                <p className="text-gray-200 font-medium">₹{alert.values.time_val.toFixed(2)}</p>
+                              </div>
+                              <div>
+                                <span className="text-gray-500">The Money:</span>
+                                <p className="text-gray-200 font-medium">{alert.values.the_money}</p>
+                              </div>
+                              {alert.values.last_price && (
+                                <div>
+                                  <span className="text-gray-500">Last Price:</span>
+                                  <p className="text-gray-200 font-medium">₹{alert.values.last_price.toFixed(2)}</p>
+                                </div>
+                              )}
+                              {alert.values.pchange_in_oi && (
+                                <div>
+                                  <span className="text-gray-500">OI Change:</span>
+                                  <p className={`font-medium ${
+                                    alert.values.pchange_in_oi > 0 ? 'text-green-400' : 'text-red-400'
+                                  }`}>
+                                    {alert.values.pchange_in_oi.toFixed(2)}%
+                                  </p>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
-                {/* No Alerts Message */}
-                {(!analysisData.data.alerts || analysisData.data.alerts.alerts.length === 0) && (
-                  <div className="card-glow rounded-lg p-8 text-center">
-                    <AlertCircle className="w-12 h-12 text-gray-500 mx-auto mb-4" />
-                    <h3 className="text-lg font-semibold text-gray-300 mb-2">No Alerts Found</h3>
-                    <p className="text-gray-500">
-                      All options for {symbol} ({selectedExpiry}) are within normal parameters
-                    </p>
+                  {/* Summary Table - Separate from Options Chain */}
+                  <div className="card-glow rounded-t-lg overflow-hidden" style={{marginBottom:0}} >
+                    <div className="overflow-x-auto">
+                      
+                      <table className="w-full">
+                        <tbody>
+                          {/* Row 1: Symbol, Futures, Fetch Timestamp */}
+                          <tr className="border-b border-gray-700/50">
+                            <td className=" px-6 py-4 ">
+                              <div className=" text-gradient text-xl font-bold ">
+                                {symbol}
+                              </div>
+                                <div className=" font-bold ">
+                                   ₹ {analysisData.data.underlying_value.toLocaleString("en-IN")}
+                                </div>
+                                <div className="text-l"><sub>{analysisData.data.timestamp} : {getDataTimestampAge(analysisData.data.timestamp)}</sub></div>
+                            </td>
+
+                            <td >
+                              <div className= "cursor-pointer hover:bg-slate-800/50 transition-colors font-bold" onClick={() => fetchHistoricalData('FUTURES')}>
+                                FUTURES : 
+                                  <span className="text-l">
+                                    {futuresLoading ? (
+                                      <div className="flex items-center justify-center">
+                                        <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                                        <span className="text-gray-400">Loading...</span>
+                                      </div>
+                                    ) : futuresAnalysis ? (
+                                      <span className={futuresAnalysis.color}>
+                                        {futuresAnalysis.action}
+                                      </span>
+                                    ) : (
+                                      <span className="text-gray-400">No Data</span>
+                                    )}
+                                </span>
+                              </div>
+                                <div>
+                                   ₹ {futuresAnalysis?.underlyingValue.toLocaleString("en-IN")}
+                                </div>
+                                <div><sub>{futuresAnalysis?.timestamp} : {getDataTimestampAge(futuresAnalysis?.timestamp)}</sub></div>
+                            </td>
+
+                            <td className="px-6 py-4 text-right" colSpan={2}>
+                              <div className="font-medium text-gray-100">
+                                Fetched {getRealTimeAge(analysisData.lastUpdated)}
+                              </div>
+                                  <div className="text-sm text-gray-400">
+                                   <button
+                                    onClick={handleFetchAnalysis}
+                                    disabled={analysisFetching}
+                                    className="btn-outline-primary inline-flex items-center text-sm">
+                                    {analysisFetching ? (
+                                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                    ) : (
+                                      <RefreshCw className="w-4 h-4 mr-2" />
+                                    )}
+                                    {analysisFetching ? 'Fetching...' : 'Fetch Latest'}
+                                </button>
+                                  </div>
+                            </td>
+                          </tr>
+                          
+                          {/* Row 2: CE OI, Expiry, PE OI */}
+                          <tr>
+                            <td className="px-6 py-4 text-center">
+                              <div className="font-bold text-lg ">
+                                Total CE : {analysisData.data.ce_oi.toLocaleString("en-IN")}
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 text-center" colSpan={2}>
+                              <div className="font-bold text-lg text-nse-accent">
+                                Expiry : {selectedExpiry} <sub>({analysisData.data.days_to_expiry} days left)</sub>
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 text-center">
+                              <div className="font-bold text-lg ">
+                                Total PE : {analysisData.data.pe_oi.toLocaleString("en-IN")}
+                              </div>
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                      
+                      
+
+                    </div>
                   </div>
-                )}  
-              </>
-            ) : null}
-          </section>
-        )}
+
+                  {/* Options Chain Table - Separate table, no gap */}
+                  <div className="card-glow rounded-b-lg overflow-hidden -mt-0">
+                    <div className="overflow-x-auto">
+                      <table className="data-table">
+                        <thead>
+                          <tr>
+                            <th>CE OI</th>
+                            <th>CE %OI</th>
+                            <th>CE Money</th>
+                            <th>CE %LTP</th>
+                            <th>CE LTP</th>
+                            <th>CE Tambu</th>
+                            <th>STRIKE</th>
+                            <th>PE Tambu</th>
+                            <th>PE LTP</th>
+                            <th>PE %LTP</th>
+                            <th>PE Money</th>
+                            <th>PE %OI</th>
+                            <th>PE OI</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {analysisData.data.processed_data
+                            .sort((a, b) => (b.strikePrice || 0) - (a.strikePrice || 0))
+                            .map((option, index) => {
+                              const ceOIRank = getOIRankStyling(option.CE?.oiRank);
+                              const peOIRank = getOIRankStyling(option.PE?.oiRank);
+                              
+                              return (
+                                <tr key={index}>
+                                  {/* CE Data */}
+                                  <td className={`${option.CE?.openInterest ? ceOIRank.className : 'text-gray-400'}`}>
+                                    <div>
+                                      {option.CE?.openInterest != null ? Math.trunc(Number(option.CE.openInterest)) : '-'}
+                                      {ceOIRank.showRank && (
+                                        <sup className="ml-1 text-xs ">
+                                          {option.CE?.oiRank}
+                                        </sup>
+                                      )}
+                                    </div>
+                                  </td>
+                                  <td className={option.CE?.pchangeinOpenInterest ? 
+                                    (option.CE.pchangeinOpenInterest > 0 ? 'pchange-positive' : 'pchange-negative') : 'pchange-neutral'}>
+                                    {option.CE?.pchangeinOpenInterest ? 
+                                      `${option.CE.pchangeinOpenInterest > 0 ? '+' : ''}${option.CE.pchangeinOpenInterest.toFixed(1)}%` : '0'}
+                                  </td>
+                                  <td 
+                                    className={`cursor-pointer hover:bg-slate-800/50 transition-colors ${option.CE ? getMoneyStatusColor(option.CE.the_money) : 'text-gray-400'}`}
+                                    onClick={() => option.strikePrice && fetchHistoricalData('OPTIONS', option.strikePrice.toString(), 'CE')}
+                                  >
+                                    <div>
+                                      {option.CE?.the_money || '-'}
+                                     
+                                    </div>
+                                  </td>
+                                  <td className={option.CE?.pchange ? 
+                                    (option.CE.pchange > 0 ? 'pchange-positive' : 'pchange-negative') : 'pchange-neutral'}>
+                                    {option.CE?.pchange ? 
+                                      `${option.CE.pchange > 0 ? '+' : ''}${option.CE.pchange.toFixed(1)}%` : '-'}
+                                  </td>
+                                  <td className="option-ce">
+                                    {option.CE?.lastPrice ? `₹${option.CE.lastPrice.toFixed(2)}` : '-'}
+                                  </td>
+                                  <td className="text-gray-300">
+                                    {option.CE?.tambu || '-'}
+                                  </td>
+                                  
+                                  {/* Strike Price */}
+                                  <td className={`font-bold text-center ${ option.CE ? getMoneyStatusColor(option.CE.the_money) : ""}`} style={{ backgroundColor: "rgba(51, 65, 85, 0.5)" }}> 
+                                    {option.strikePrice}
+                                  </td>
+                                  
+                                  {/* PE Data */}
+                                  <td className="text-gray-300">
+                                    {option.PE?.tambu || '-'}
+                                  </td>
+                                  <td className="option-pe">
+                                    {option.PE?.lastPrice ? `₹${option.PE.lastPrice.toFixed(2)}` : '-'}
+                                  </td>
+                                  <td className={option.PE?.pchange ? 
+                                    (option.PE.pchange > 0 ? 'pchange-positive' : 'pchange-negative') : 'pchange-neutral'}>
+                                    {option.PE?.pchange ? 
+                                      `${option.PE.pchange > 0 ? '+' : ''}${option.PE.pchange.toFixed(1)}%` : '-'}
+                                  </td>
+                                  <td 
+                                    className={`cursor-pointer hover:bg-slate-800/50 transition-colors ${option.PE ? getMoneyStatusColor(option.PE.the_money) : 'text-gray-400'}`}
+                                    onClick={() => option.strikePrice && fetchHistoricalData('OPTIONS', option.strikePrice.toString(), 'PE')}
+                                  >
+                                    <div>
+                                      {option.PE?.the_money || '-'}
+                                    </div>
+                                  </td>
+                                  <td className={option.PE?.pchangeinOpenInterest ? 
+                                    (option.PE.pchangeinOpenInterest > 0 ? 'pchange-positive' : 'pchange-negative') : 'pchange-neutral'}>
+                                    {option.PE?.pchangeinOpenInterest ? 
+                                      `${option.PE.pchangeinOpenInterest > 0 ? '+' : ''}${option.PE.pchangeinOpenInterest.toFixed(1)}%` : '0'}
+                                  </td>
+                                  <td className={`${option.PE?.openInterest ? peOIRank.className : 'text-gray-400'}`}>
+                                    <div>
+                                      {option.PE?.openInterest != null ? Math.trunc(Number(option.PE.openInterest)) : '-'}
+                                      {peOIRank.showRank && (
+                                        <sup className="ml-1 text-xs">
+                                          {option.PE?.oiRank}
+                                        </sup>
+                                      )}
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* No Alerts Message */}
+                  {(!analysisData.data.alerts || analysisData.data.alerts.alerts.length === 0) && (
+                    <div className="card-glow rounded-lg p-8 text-center">
+                      <AlertCircle className="w-12 h-12 text-gray-500 mx-auto mb-4" />
+                      <h3 className="text-lg font-semibold text-gray-300 mb-2">No Alerts Found</h3>
+                      <p className="text-gray-500">
+                        All options for {symbol} ({selectedExpiry}) are within normal parameters
+                      </p>
+                    </div>
+                  )}  
+                </>
+              ) : null}
+            </section>
+          )}
+        </div>
       </div>
-    </div>
+
+      {/* Historical Data Modal */}
+      <HistoricalDataModal
+        isOpen={historicalModalOpen}
+        onClose={() => setHistoricalModalOpen(false)}
+        data={historicalData}
+        loading={historicalLoading}
+        error={historicalError}
+        title={historicalTitle}
+      />
+    </>
   );
 }
 

@@ -12,11 +12,11 @@ import { db, DB_KEYS } from '@/app/lib/db';
 // For static export, we need to use the full API URL
 const API_BASE_URL = process.env.NODE_ENV === 'development' 
   ? 'http://localhost:3001'
-  : process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'; // Configure this for production
+  : process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 120000, // 2 minutes timeout for batch operations
+  timeout: 120000,
 });
 
 // Enhanced API client with database integration
@@ -24,7 +24,6 @@ export const apiClient = {
   // Securities List
   async getSecurities(forceRefresh = false): Promise<ApiResponse<SecurityListResponse>> {
     try {
-      // Check if we should use cached data
       if (!forceRefresh) {
         const cachedData = await db.getData<SecurityListResponse>(DB_KEYS.SECURITIES_LIST);
         if (cachedData) {
@@ -38,11 +37,9 @@ export const apiClient = {
         }
       }
 
-      // Fetch from API
       const response = await api.get('/api/securities');
       const apiResponse: ApiResponse<SecurityListResponse> = response.data;
 
-      // Store in database if successful
       if (apiResponse.success && apiResponse.data) {
         await db.storeData(DB_KEYS.SECURITIES_LIST, apiResponse.data);
       }
@@ -59,7 +56,6 @@ export const apiClient = {
     try {
       const key = DB_KEYS.CONTRACT_INFO(symbol);
       
-      // Check if we should use cached data
       if (!forceRefresh) {
         const cachedData = await db.getData<ContractInfoResponse>(key);
         if (cachedData) {
@@ -73,11 +69,9 @@ export const apiClient = {
         }
       }
 
-      // Fetch from API
       const response = await api.get(`/api/contract-info?symbol=${encodeURIComponent(symbol)}`);
       const apiResponse: ApiResponse<ContractInfoResponse> = response.data;
 
-      // Store in database if successful
       if (apiResponse.success && apiResponse.data) {
         await db.storeData(key, apiResponse.data);
       }
@@ -98,7 +92,6 @@ export const apiClient = {
     try {
       const key = DB_KEYS.SINGLE_ANALYSIS(symbol, expiry);
       
-      // Check if we should use cached data
       if (!forceRefresh) {
         const cachedData = await db.getData<SingleAnalysisResponse>(key);
         if (cachedData) {
@@ -112,13 +105,11 @@ export const apiClient = {
         }
       }
 
-      // Fetch from API
       const response = await api.get(
         `/api/single-analysis?symbol=${encodeURIComponent(symbol)}&expiry=${encodeURIComponent(expiry)}`
       );
       const apiResponse: ApiResponse<SingleAnalysisResponse> = response.data;
 
-      // Store in database if successful
       if (apiResponse.success && apiResponse.data) {
         await db.storeData(key, apiResponse.data);
       }
@@ -139,7 +130,6 @@ export const apiClient = {
     try {
       const key = DB_KEYS.FUTURES_DATA(symbol, expiry);
       
-      // Check if we should use cached data
       if (!forceRefresh) {
         const cachedData = await db.getData<FuturesDataResponse>(key);
         if (cachedData) {
@@ -153,13 +143,11 @@ export const apiClient = {
         }
       }
 
-      // Fetch from API
       const response = await api.get(
         `/api/futures-data?symbol=${encodeURIComponent(symbol)}&expiry=${encodeURIComponent(expiry)}`
       );
       const apiResponse: ApiResponse<FuturesDataResponse> = response.data;
 
-      // Store in database if successful
       if (apiResponse.success && apiResponse.data) {
         await db.storeData(key, apiResponse.data);
       }
@@ -174,7 +162,6 @@ export const apiClient = {
   // Batch Analysis
   async getBatchAnalysis(forceRefresh = false): Promise<ApiResponse<BatchAnalysisResponse>> {
     try {
-      // Check if we should use cached data
       if (!forceRefresh) {
         const cachedData = await db.getData<BatchAnalysisResponse>(DB_KEYS.BATCH_ANALYSIS);
         if (cachedData) {
@@ -188,11 +175,9 @@ export const apiClient = {
         }
       }
 
-      // Fetch from API
       const response = await api.post('/api/batch-analysis');
       const apiResponse: ApiResponse<BatchAnalysisResponse> = response.data;
 
-      // Store in database if successful
       if (apiResponse.success && apiResponse.data) {
         await db.storeData(DB_KEYS.BATCH_ANALYSIS, apiResponse.data);
       }
@@ -200,6 +185,38 @@ export const apiClient = {
       return apiResponse;
     } catch (error) {
       console.error('Error fetching batch analysis:', error);
+      throw error;
+    }
+  },
+
+  // Derivatives Historical Data
+  async getDerivativesHistorical(params: {
+    symbol: string;
+    instrument_type: 'FUTURES' | 'OPTIONS';
+    expiry: string;
+    year?: string;
+    strike_price?: string;
+    option_type?: 'CE' | 'PE';
+    from_date: string;
+    to_date: string;
+  }): Promise<ApiResponse<any>> {
+    try {
+      const queryParams = new URLSearchParams({
+        symbol: params.symbol,
+        instrument_type: params.instrument_type,
+        expiry: params.expiry,
+        from_date: params.from_date,
+        to_date: params.to_date,
+      });
+
+      if (params.year) queryParams.append('year', params.year);
+      if (params.strike_price) queryParams.append('strike_price', params.strike_price);
+      if (params.option_type) queryParams.append('option_type', params.option_type);
+
+      const response = await api.get(`/api/derivatives-historical?${queryParams.toString()}`);
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching derivatives historical data:', error);
       throw error;
     }
   },
@@ -298,4 +315,24 @@ export const getMoneyStatusColor = (theMoneyStatus: string): string => {
 export const getPChangeColorClass = (value: number | undefined): string => {
   if (value === undefined || value === null) return 'pchange-neutral';
   return value > 0 ? 'pchange-positive' : value < 0 ? 'pchange-negative' : 'pchange-neutral';
+};
+
+// Format date to DD-MMM-YYYY format (e.g., 06-Dec-2025)
+export const formatDateForAPI = (date: Date): string => {
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0'); 
+  const year = date.getFullYear();
+  return `${day}-${month}-${year}`;
+};
+
+// Get date 20 days ago
+export const get20DaysAgo = (): string => {
+  const date = new Date();
+  date.setDate(date.getDate() - 20);
+  return formatDateForAPI(date);
+};
+
+// Get today's date
+export const getToday = (): string => {
+  return formatDateForAPI(new Date());
 };
