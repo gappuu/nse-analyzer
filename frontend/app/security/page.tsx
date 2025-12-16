@@ -51,8 +51,9 @@ function SecurityPageContent() {
   };
 
   // Function to calculate real-time age from data timestamp string
-  const getDataTimestampAge = (timestampString: string) => {
+  const getDataTimestampAge = (timestampString?: string) => {
     try {
+      if (!timestampString) return 'unknown';
       const dataTime = new Date(timestampString).getTime();
       return db.getDataAge(dataTime, currentTime);
     } catch (error) {
@@ -106,19 +107,19 @@ function SecurityPageContent() {
         let color = '';
         
         if (pchange > 0 && pchangeinOpenInterest > 0) {
-          action = 'Long Buildup';
+          action = ' Long Buildup';
           color = 'text-green-400';
         } else if (pchange > 0 && pchangeinOpenInterest < 0) {
-          action = 'Short Covering';
+          action = ' Short Covering';
           color = 'text-gray-300';
         } else if (pchange < 0 && pchangeinOpenInterest > 0) {
-          action = 'Short Buildup';
+          action = ' Short Buildup';
           color = 'text-red-400';
         } else if (pchange < 0 && pchangeinOpenInterest < 0) {
-          action = 'Long Covering';
+          action = ' Long Covering';
           color = 'text-gray-300';
         } else {
-          action = 'Neutral';
+          action = ' Neutral';
           color = 'text-gray-400';
         }
         
@@ -583,46 +584,47 @@ function SecurityPageContent() {
                 {/* Summary Table - Separate from Options Chain */}
                 <div className="card-glow rounded-t-lg overflow-hidden" style={{marginBottom:0}} >
                   <div className="overflow-x-auto">
+                    
                     <table className="w-full">
                       <tbody>
-                        {/* Row 1: Symbol, Underlying Value, Timestamp, Fetch Timestamp */}
+                        {/* Row 1: Symbol, Futures, Fetch Timestamp */}
                         <tr className="border-b border-gray-700/50">
-                          <td className="px-6 py-4 font-bold text-xl ">
-                            <div className=" text-gradient">
-                              {symbol} 
+                          <td className=" px-6 py-4 ">
+                            <div className=" text-gradient text-xl font-bold ">
+                              {symbol}
+                            </div>
+                              <div className=" font-bold ">
+                                 ₹ {analysisData.data.underlying_value.toLocaleString("en-IN")}
+                              </div>
+                              <div className="text-l"><sub>{analysisData.data.timestamp} : {getDataTimestampAge(analysisData.data.timestamp)}</sub></div>
+                          </td>
+
+                          <td className="px-6 py-4 text-l">
+                            <div className="font-bold">
+                              FUTURES : 
+                                <span className="text-l">
+                                  {futuresLoading ? (
+                                    <div className="flex items-center justify-center">
+                                      <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                                      <span className="text-gray-400">Loading...</span>
+                                    </div>
+                                  ) : futuresAnalysis ? (
+                                    <span className={futuresAnalysis.color}>
+                                      {futuresAnalysis.action}
+                                    </span>
+                                  ) : (
+                                    <span className="text-gray-400">No Data</span>
+                                  )}
+                              </span>
+
                             </div>
                               <div>
-                                <sub> ₹ {analysisData.data.underlying_value.toLocaleString("en-IN")}</sub> 
+                                 ₹ {futuresAnalysis?.underlyingValue.toLocaleString("en-IN")}
                               </div>
+                              <div><sub>{futuresAnalysis?.timestamp} : {getDataTimestampAge(futuresAnalysis?.timestamp)}</sub></div>
                           </td>
-                          <td className="px-6 py-4">
-                            <div className="font-semibold text-lg text-gray-100">
-                              {analysisData.data.timestamp}
-                            </div>
-                              <div className="text-sm text-gray-400">
-                                Data Age : {getDataTimestampAge(analysisData.data.timestamp)}
-                              </div>
-                          </td>
-                          <td className="px-6 py-4 text-center">
-                            <div className="font-medium text-gray-100">
-                              FUTURES : {futuresAnalysis?.underlyingValue}
-                            </div>
-                            <div className="text-sm">
-                              {futuresLoading ? (
-                                <div className="flex items-center justify-center">
-                                  <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                                  <span className="text-gray-400">Loading...</span>
-                                </div>
-                              ) : futuresAnalysis ? (
-                                <span className={futuresAnalysis.color}>
-                                  {futuresAnalysis.action} <sub>{futuresAnalysis?.timestamp}</sub>
-                                </span>
-                              ) : (
-                                <span className="text-gray-400">No Data</span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 text-right">
+
+                          <td className="px-6 py-4 text-right" colSpan={2}>
                             <div className="font-medium text-gray-100">
                               Fetched {getRealTimeAge(analysisData.lastUpdated)}
                             </div>
@@ -662,6 +664,9 @@ function SecurityPageContent() {
                         </tr>
                       </tbody>
                     </table>
+                    
+                    
+
                   </div>
                 </div>
 
