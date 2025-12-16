@@ -34,13 +34,34 @@ fi
 print_status "Verifying folder structure..."
 
 # Check for backend
-if [ ! -f "resource/nse-analyzer" ]; then
-    print_warning "Backend binary not found at resource/nse-analyzer"
-    echo "Please compile your Rust backend first:"
-    echo "  cd ../backend && cargo build --release"
-    echo ""
+BACKEND_RESOURCE="resource/nse-analyzer"
+BACKEND_BUILD="../backend/target/release/nse-analyzer"
+
+# Check if resource binary exists and is non-empty
+if [ -s "$BACKEND_RESOURCE" ]; then
+    print_success "Backend binary found: $BACKEND_RESOURCE"
+
 else
-    print_success "Backend binary found: resource/nse-analyzer"
+    print_warning "Backend binary missing or empty at $BACKEND_RESOURCE"
+
+    # Check fallback build location
+    if [ -s "$BACKEND_BUILD" ]; then
+        print_success "Found compiled backend at $BACKEND_BUILD"
+        echo "Copying backend binary to resources..."
+
+        mkdir -p "$(dirname "$BACKEND_RESOURCE")"
+        cp "$BACKEND_BUILD" "$BACKEND_RESOURCE"
+        chmod +x "$BACKEND_RESOURCE"
+
+        print_success "Backend binary copied to $BACKEND_RESOURCE"
+    else
+        print_warning "No compiled backend found at $BACKEND_BUILD"
+        echo ""
+        echo "Please compile your Rust backend first:"
+        echo "  cd ../backend && cargo build --release"
+        echo ""
+        exit 1
+    fi
 fi
 
 # Check for frontend
@@ -146,24 +167,18 @@ echo "├── frontend/"
 echo "│   ├── app/                          ← Next.js frontend"
 echo "│   └── out/                          ← Built static files"
 echo "└── tauri-app/"
+echo "    ├── resource/nse-analyzer         ← Backend binary copied here"
 echo "    ├── src-tauri/                    ← Tauri configuration"
 echo "    └── package.json                  ← Tauri dependencies"
 echo ""
 print_status "Next steps:"
 echo ""
-echo "1. Ensure backend is compiled:"
-echo "   cd ../backend && cargo build --release"
-echo ""
-echo "2. Add app icons to src-tauri/icons/ (see README.md there)"
-echo ""
-echo "3. Development commands (run from tauri-app/):"
-echo "   npm run dev                    # Full Tauri development"
-echo "   npm run frontend:dev           # Frontend development only"
-echo ""
-echo "4. Build desktop app:"
+echo "1. Build desktop app:"
 echo "   npm run build                  # Creates .dmg/.msi/.deb"
 echo ""
-echo "🎉 Your organized NSE Options Analyzer desktop app is ready!"
+echo "2. Development commands (run from tauri-app/):"
+echo "   npm run dev                    # Full Tauri development"
+echo "   npm run frontend:dev           # Frontend development only"
 echo ""
 echo "Output will be in:"
 echo "  tauri-app/src-tauri/target/release/bundle/"
