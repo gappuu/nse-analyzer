@@ -139,15 +139,42 @@ function SecurityPageContent() {
         params.option_type = optionType;
       }
 
+      // console.log('Fetching historical data with params:', params);
       const response = await apiClient.getDerivativesHistorical(params);
+      // console.log('Historical data response:', response);
 
-      if (response.success && response.data && response.data.data) {
-        setHistoricalData(response.data.data);
+      // Handle different response structures
+      if (response.success) {
+        let dataArray = null;
+        
+        // Try response.data.data first (nested structure)
+        if (response.data && response.data.data && Array.isArray(response.data.data)) {
+          dataArray = response.data.data;
+        } 
+        // Try response.data directly (flat structure)
+        else if (response.data && Array.isArray(response.data)) {
+          dataArray = response.data;
+        }
+        // Try response directly (if data is at top level)
+        else if (Array.isArray(response)) {
+          dataArray = response;
+        }
+
+        if (dataArray && dataArray.length > 0) {
+          // console.log('Setting historical data:', dataArray);
+          setHistoricalData(dataArray);
+        } else {
+          // console.warn('No data found in response');
+          setHistoricalError('No historical data available for the selected period');
+          setHistoricalData([]);
+        }
       } else {
+        // console.error('Response not successful:', response);
         setHistoricalError(response.error || 'Failed to fetch historical data');
         setHistoricalData([]);
       }
     } catch (err) {
+      console.error('Error fetching historical data:', err);
       setHistoricalError(handleApiError(err));
       setHistoricalData([]);
     } finally {
@@ -167,7 +194,7 @@ function SecurityPageContent() {
       
       if (response.success && response.data && response.data.data.length > 0) {
         const data = response.data.data[0];
-        const { pchange, pchangeinOpenInterest, underlyingValue } = data;
+        const { pchange, pchangeinOpenInterest, underlyingValue, lastPrice, openInterest, changeinOpenInterest } = data;
         
         let action = '';
         let color = '';
@@ -193,7 +220,10 @@ function SecurityPageContent() {
           action,
           color,
           underlyingValue,
-          timestamp: response.data.timestamp
+          timestamp: response.data.timestamp,
+          lastPrice,
+          openInterest,
+          changeinOpenInterest
         });
       } else {
         console.error('No futures data available or API error:', response.error);
@@ -201,7 +231,10 @@ function SecurityPageContent() {
           action: 'No Data',
           color: 'text-gray-500',
           underlyingValue: 0,
-          timestamp: ''
+          timestamp: '',
+          lastPrice: 0,
+          openInterest: 0,
+          changeinOpenInterest: 0
         });
       }
     } catch (error) {
@@ -210,7 +243,10 @@ function SecurityPageContent() {
         action: 'Error',
         color: 'text-red-400',
         underlyingValue: 0,
-        timestamp: ''
+        timestamp: '',
+        lastPrice: 0,
+        openInterest: 0,
+        changeinOpenInterest: 0
       });
     } finally {
       setFuturesLoading(false);
@@ -685,7 +721,7 @@ function SecurityPageContent() {
                                 </span>
                               </div>
                                 <div>
-                                   ₹ {futuresAnalysis?.underlyingValue.toLocaleString("en-IN")}
+                                   ₹ {futuresAnalysis?.lastPrice.toLocaleString("en-IN")}
                                 </div>
                                 <div><sub>{futuresAnalysis?.timestamp} : {getDataTimestampAge(futuresAnalysis?.timestamp)}</sub></div>
                             </td>

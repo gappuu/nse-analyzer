@@ -121,6 +121,9 @@ export interface FuturesDataResponse {
     pchange: number;
     pchangeinOpenInterest: number;
     underlyingValue: number;
+    lastPrice: number;
+    openInterest: number;
+    changeinOpenInterest: number;
   }>;
   timestamp: string;
 }
@@ -130,6 +133,9 @@ export interface FuturesAnalysis {
   color: string;
   underlyingValue: number;
   timestamp: string;
+  lastPrice: number;
+  openInterest: number;
+  changeinOpenInterest: number;
 }
 
 
