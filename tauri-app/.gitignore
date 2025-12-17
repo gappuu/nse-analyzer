@@ -1,8 +1,10 @@
 /node_modules
 /.next
-/src-tauri/target
-/resource
-/src-tauri/resource/nse-analyzer
 /src-tauri/icons/
+/src-tauri/target
+/src-tauri/resource
+/src-tauri/resource/nse-analyzer
+/src-tauri/icons
+src-tauri/gen
 .env
 .DS_Store
