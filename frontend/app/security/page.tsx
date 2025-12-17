@@ -104,6 +104,52 @@ function SecurityPageContent() {
     }
   };
 
+  // Helper function to create latest data point from cached analysis
+  const createLatestDataPoint = (
+    instrumentType: 'FUTURES' | 'OPTIONS',
+    strikePrice?: string,
+    optionType?: 'CE' | 'PE'
+  ): HistoricalDataPoint | null => {
+    if (instrumentType === 'FUTURES' && futuresAnalysis) {
+      const timestamp = futuresAnalysis.timestamp ? 
+        futuresAnalysis.timestamp.split(' ')[0] : // Extract date part
+        getToday();
+      
+      return {
+        FH_TIMESTAMP: timestamp,
+        FH_UNDERLYING_VALUE: futuresAnalysis.underlyingValue,
+        FH_OPEN_INT: futuresAnalysis.openInterest,
+        FH_CHANGE_IN_OI: futuresAnalysis.changeinOpenInterest,
+        FH_SETTLE_PRICE: futuresAnalysis.lastPrice
+      };
+    }
+
+    if (instrumentType === 'OPTIONS' && strikePrice && optionType && analysisData) {
+      // Find the option data for the specified strike and type
+      const optionData = analysisData.data.processed_data.find(
+        option => option.strikePrice === parseInt(strikePrice)
+      );
+
+      const relevantOption = optionType === 'CE' ? optionData?.CE : optionData?.PE;
+      
+      if (relevantOption) {
+        const timestamp = analysisData.data.timestamp ? 
+          analysisData.data.timestamp.split(' ')[0] : // Extract date part
+          getToday();
+        
+        return {
+          FH_TIMESTAMP: timestamp,
+          FH_UNDERLYING_VALUE: analysisData.data.underlying_value,
+          FH_OPEN_INT: relevantOption.openInterest || 0,
+          FH_CHANGE_IN_OI: relevantOption.changeinOpenInterest || 0,
+          FH_SETTLE_PRICE: relevantOption.lastPrice || 0
+        };
+      }
+    }
+
+    return null;
+  };
+
   // Function to fetch historical data
   const fetchHistoricalData = async (
     instrumentType: 'FUTURES' | 'OPTIONS',
@@ -123,7 +169,7 @@ function SecurityPageContent() {
       if (instrumentType === 'FUTURES') {
         setHistoricalTitle(`${symbol} Futures Historical Data - ${futuresExpiry}`);
       } else {
-        setHistoricalTitle(`${symbol} ${strikePrice} ${optionType} Historical Data - ${futuresExpiry}`);
+        setHistoricalTitle(`${symbol} ${strikePrice} ${optionType} Historical Data - ${selectedExpiry}`);
       }
 
       const params: any = {
@@ -160,9 +206,29 @@ function SecurityPageContent() {
           dataArray = response;
         }
 
-        if (dataArray && dataArray.length > 0) {
-          // console.log('Setting historical data:', dataArray);
-          setHistoricalData(dataArray);
+        // Create final data array with historical data
+        let finalDataArray = dataArray || [];
+
+        // Append latest data from cache if available
+        // [figure out why latest OI data is different the only use it]
+        // const latestDataPoint = createLatestDataPoint(instrumentType, strikePrice, optionType); 
+        const latestDataPoint = null
+        if (latestDataPoint) {
+          // Check if today's data already exists in historical data
+          const today = getToday();
+          const existsToday = finalDataArray.some((item: any) => 
+            item.FH_TIMESTAMP && item.FH_TIMESTAMP.startsWith(today)
+          );
+          
+          if (!existsToday) {
+            // Add latest data as the most recent entry
+            finalDataArray = [latestDataPoint, ...finalDataArray];
+          }
+        }
+
+        if (finalDataArray && finalDataArray.length > 0) {
+          // console.log('Setting historical data with latest:', finalDataArray);
+          setHistoricalData(finalDataArray);
         } else {
           // console.warn('No data found in response');
           setHistoricalError('No historical data available for the selected period');
