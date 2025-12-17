@@ -34,7 +34,7 @@ fi
 print_status "Verifying folder structure..."
 
 # Check for backend
-BACKEND_RESOURCE="resource/nse-analyzer"
+BACKEND_RESOURCE="src-tauri/resource/nse-analyzer"
 BACKEND_BUILD="../backend/target/release/nse-analyzer"
 
 # Check if resource binary exists and is non-empty
@@ -58,7 +58,7 @@ else
         print_warning "No compiled backend found at $BACKEND_BUILD"
         echo ""
         echo "Please compile your Rust backend first:"
-        echo "  cd ../backend && cargo build --release"
+        echo "  cd ../backend && CARGO_INCREMENTAL=0 cargo build --release"
         echo ""
         exit 1
     fi
@@ -167,9 +167,9 @@ echo "├── frontend/"
 echo "│   ├── app/                          ← Next.js frontend"
 echo "│   └── out/                          ← Built static files"
 echo "└── tauri-app/"
-echo "    ├── resource/nse-analyzer         ← Backend binary copied here"
-echo "    ├── src-tauri/                    ← Tauri configuration"
-echo "    └── package.json                  ← Tauri dependencies"
+echo "    ├── src-tauri/                            ← Tauri configuration"
+echo "    └── package.json                          ← Tauri dependencies"
+echo "    ├── src-tauri/resource/nse-analyzer       ← Backend binary copied here"
 echo ""
 print_status "Next steps:"
 echo ""

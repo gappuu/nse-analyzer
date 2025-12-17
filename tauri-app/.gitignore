@@ -2,7 +2,7 @@
 /.next
 /src-tauri/target
 /resource
-/resource/nse-analyzer
+/src-tauri/resource/nse-analyzer
 /src-tauri/icons/
 .env
 .DS_Store
