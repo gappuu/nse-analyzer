@@ -74,7 +74,7 @@ export default function HistoricalDataModal({
       day: '2-digit', 
       month: 'short' 
     }),
-    openInterest: item.FH_OPEN_INT,
+    openInterest: item.FH_OPEN_INT / (item.FH_MARKET_LOT || 1), // Normalize by market lot
     settlePrice: item.FH_SETTLE_PRICE,
     fullDate: item.FH_TIMESTAMP,
     sortDate: new Date(item.FH_TIMESTAMP).getTime() // For sorting
@@ -183,14 +183,14 @@ export default function HistoricalDataModal({
                               ₹{formatNumber(row.FH_UNDERLYING_VALUE)}
                             </td>
                             <td className="px-4 py-3 text-sm text-right text-gray-100">
-                              {formatNumber(row.FH_OPEN_INT)}
+                              {formatNumber(row.FH_OPEN_INT / (row.FH_MARKET_LOT || 1))}
                             </td>
                             <td className={`px-4 py-3 text-sm text-right font-medium ${getOIChangeColor(row.FH_CHANGE_IN_OI)}`}>
                               <div className="flex items-center justify-end gap-1">
                                 {row.FH_CHANGE_IN_OI > 0 && <TrendingUp className="w-4 h-4" />}
                                 {row.FH_CHANGE_IN_OI < 0 && <TrendingDown className="w-4 h-4" />}
                                 {row.FH_CHANGE_IN_OI > 0 ? '+' : ''}
-                                {formatNumber(row.FH_CHANGE_IN_OI)}
+                                {formatNumber(row.FH_CHANGE_IN_OI / (row.FH_MARKET_LOT || 1))}
                               </div>
                             </td>
                             <td className="px-4 py-3 text-sm text-right text-gray-100">

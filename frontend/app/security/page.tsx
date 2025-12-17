@@ -183,11 +183,11 @@ function SecurityPageContent() {
       if (instrumentType === 'OPTIONS' && strikePrice && optionType) {
         params.strike_price = strikePrice;
         params.option_type = optionType;
+        params.expiry = selectedExpiry;
       }
 
       // console.log('Fetching historical data with params:', params);
       const response = await apiClient.getDerivativesHistorical(params);
-      // console.log('Historical data response:', response);
 
       // Handle different response structures
       if (response.success) {
@@ -210,9 +210,7 @@ function SecurityPageContent() {
         let finalDataArray = dataArray || [];
 
         // Append latest data from cache if available
-        // [figure out why latest OI data is different the only use it]
-        // const latestDataPoint = createLatestDataPoint(instrumentType, strikePrice, optionType); 
-        const latestDataPoint = null
+        const latestDataPoint = createLatestDataPoint(instrumentType, strikePrice, optionType); 
         if (latestDataPoint) {
           // Check if today's data already exists in historical data
           const today = getToday();

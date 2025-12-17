@@ -145,4 +145,5 @@ export interface HistoricalDataPoint {
   FH_OPEN_INT: number;
   FH_CHANGE_IN_OI: number;
   FH_SETTLE_PRICE: number;
+  FH_MARKET_LOT?: number;
 }
