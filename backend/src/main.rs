@@ -1,6 +1,6 @@
 
 mod app_config;
-use nse_analyzer::nse:: nse_commands;
+use nse_analyzer::nse::nse_commands;
 use nse_analyzer::nse::config;
 use app_config::{AppConfig, Colorize};
 use nse_commands::NSECommands;
