@@ -31,19 +31,23 @@ const CustomTooltip = ({ active, payload, label }: any) => {
   };
 
   if (active && payload && payload.length) {
-    return (
-      <div className="bg-slate-800 border border-gray-600 rounded-lg p-3 shadow-lg">
-        <p className="text-gray-200 font-medium mb-2">{`Date: ${label}`}</p>
-        {payload.map((entry: any, index: number) => (
-          <p key={index} style={{ color: entry.color }} className="text-sm">
-            {entry.name === 'openInterest' ? 'Open Interest' : 'Settle Price'}: 
-            {entry.name === 'settlePrice' ? ' ₹' : ' '}{formatNumber(entry.value)}
-          </p>
-        ))}
-      </div>
-    );
-  }
-  return null;
+  const uniquePayload = Array.from(
+    new Map(payload.map((item: any) => [item.name, item])).values()
+  );
+  return (
+    <div className="bg-slate-800 border border-gray-600 rounded-lg p-3 shadow-lg">
+      <p className="text-gray-200 font-medium mb-2">{`Date: ${label}`}</p>
+      {uniquePayload.map((entry: any, index: number) => (
+        <p key={index} style={{ color: entry.color }} className="text-sm">
+          {entry.name === 'openInterest' ? 'Open Interest' : 'Settle Price'}:
+          {entry.name === 'settlePrice' ? ' ₹' : ' '}
+          {formatNumber(entry.value)}
+        </p>
+      ))}
+    </div>
+  );
+}
+return null;
 };
 
 export default function HistoricalDataModal({
