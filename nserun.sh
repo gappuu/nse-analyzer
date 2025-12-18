@@ -7,7 +7,7 @@ set -euo pipefail
 # ==============================
 BACKEND_DIR="$HOME/Desktop/nse-analyzer/backend"
 FRONTEND_DIR="$HOME/Desktop/nse-analyzer/frontend"
-BACKEND_PORT=3002
+BACKEND_PORT=3001
 FRONTEND_PORT=3000
 LOG_DIR="$HOME/Desktop/nse-analyzer/logs"
 
@@ -97,11 +97,11 @@ kill_port "$FRONTEND_PORT"
 # ==============================
 # BACKEND
 # ==============================
-# log "🦀 Building Rust backend (release, no incremental)..."
-# (
-#     cd "$BACKEND_DIR"
-#     CARGO_INCREMENTAL=0 cargo build --release >>"$BACKEND_LOG" 2>&1
-# )
+log "🦀 Building Rust backend (release, no incremental)..."
+(
+    cd "$BACKEND_DIR"
+    CARGO_INCREMENTAL=0 cargo build --release >>"$BACKEND_LOG" 2>&1
+)
 
 log "🚀 Starting Rust backend on port $BACKEND_PORT..."
 (
