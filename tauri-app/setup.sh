@@ -25,7 +25,7 @@ if [ ! -f "src-tauri/tauri.conf.json" ]; then
     print_error "Please run this script from the tauri-app directory!"
     echo "Expected structure:"
     echo "nse-analyzer/"
-    echo "├── backend/"
+    echo "├── backend/" 
     echo "├── frontend/"
     echo "└── tauri-app/     ← Run script from here"
     exit 1
@@ -65,9 +65,9 @@ else
 fi
 
 # Check for frontend
-if [ ! -d "../frontend" ]; then
-    print_error "Frontend directory not found at ../frontend"
-    echo "Expected structure: nse-analyzer/frontend/"
+if [ ! -d "../frontend/out" ]; then
+    print_error "Frontend Static directory not found at ../frontend/out"
+    echo "from frontend folder-> run command "npm run build-static""
     exit 1
 else
     print_success "Frontend directory found: ../frontend"
