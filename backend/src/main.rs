@@ -1,13 +1,12 @@
-mod config;
-mod models;
-mod nse_client;
-mod processor;
-mod rules;
-mod api_server_axum;  // Use the new Axum-based server
+use nse_analyzer::nse::processor;
+use nse_analyzer::nse::NSEClient;
+use nse_analyzer::nse::config;
+use nse_analyzer::nse::models;
+use nse_analyzer::nse::rules;
+use nse_analyzer::nse::nse_api_server;
 
 use anyhow::Result;
 use colored::Colorize;
-use nse_client::NSEClient;
 use std::sync::Arc;
 
 /// Run batch fetch for all FNO securities
@@ -345,7 +344,7 @@ async fn run_server(port: u16) -> Result<()> {
     println!("{}", "=".repeat(60).blue());
     println!();
 
-    api_server_axum::start_server(port).await
+    nse_api_server::start_server(port).await
 }
 
 #[tokio::main]

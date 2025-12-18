@@ -7,7 +7,7 @@ set -euo pipefail
 # ==============================
 BACKEND_DIR="$HOME/Desktop/nse-analyzer/backend"
 FRONTEND_DIR="$HOME/Desktop/nse-analyzer/frontend"
-BACKEND_PORT=3001
+BACKEND_PORT=3002
 FRONTEND_PORT=3000
 LOG_DIR="$HOME/Desktop/nse-analyzer/logs"
 

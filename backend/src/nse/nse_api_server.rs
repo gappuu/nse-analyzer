@@ -1,7 +1,7 @@
-use crate::config;
-use crate::models::{Security, SecurityType};
-use crate::nse_client::NSEClient;
-use crate::{processor, rules};
+use super::config;
+use super::models::{Security, SecurityType};
+use super::nse_client::NSEClient;
+use super::{processor, rules};
 use anyhow::Result;
 use axum::{
     extract::{Query, State},
@@ -120,7 +120,7 @@ pub struct AppState {
 #[derive(Default)]
 struct Cache {
     securities_list: Option<(Vec<Security>, Instant)>,
-    contract_info: HashMap<String, (crate::models::ContractInfo, Instant)>,
+    contract_info: HashMap<String, (super::models::ContractInfo, Instant)>,
 }
 
 const CACHE_DURATION: Duration = Duration::from_secs(300); // 5 minutes

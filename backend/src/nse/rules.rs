@@ -1,4 +1,4 @@
-use crate::processor::{ProcessedOptionData, ProcessedOptionDetail};
+use super::processor::{ProcessedOptionData, ProcessedOptionDetail};
 use serde::{Deserialize, Serialize};
 
 /// Alert types for option strikes
@@ -240,8 +240,8 @@ pub fn run_batch_rules(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::OptionDetail;
-    use crate::processor::ProcessedOptionDetail;
+    use crate::nse::models::OptionDetail;
+    use crate::nse::processor::ProcessedOptionDetail;
     
     #[test]
     fn test_huge_oi_increase_detection() {
