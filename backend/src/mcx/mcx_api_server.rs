@@ -1,6 +1,7 @@
 use super::config;
 use super::models::{Ticker, OptionChainResponse};
 use super::mcx_client::MCXClient;
+use super::processor;
 use anyhow::Result;
 use axum::{
     extract::{Query, State},
@@ -87,7 +88,7 @@ pub struct BatchSummary {
 #[derive(Debug, Serialize)]
 pub struct BatchResult {
     pub ticker: Ticker,
-    pub option_chain: Option<OptionChainResponse>,
+    pub processed_data: Option<processor::McxSingleAnalysisResponse>,
     pub error: Option<String>,
 }
 
@@ -186,11 +187,11 @@ async fn get_ticker_list(State(app_state): State<AppState>) -> Result<Json<ApiRe
     }
 }
 
-/// GET /api/mcx/option-chain?commodity=COPPER&expiry=23DEC2025 - Get option chain for specific commodity and expiry
+/// GET /api/mcx/option-chain?commodity=COPPER&expiry=23DEC2025 - Get processed option chain for specific commodity and expiry
 async fn get_option_chain(
     Query(query): Query<OptionChainQuery>,
     State(app_state): State<AppState>,
-) -> Result<Json<ApiResponse<OptionChainResponse>>, StatusCode> {
+) -> Result<Json<ApiResponse<processor::McxSingleAnalysisResponse>>, StatusCode> {
     let start_time = Instant::now();
     let cache_key = format!("{}_{}", query.commodity, query.expiry);
 
@@ -199,12 +200,45 @@ async fn get_option_chain(
         let cache = app_state.cache.read().await;
         if let Some((option_chain, cached_at)) = cache.option_chains.get(&cache_key) {
             if cached_at.elapsed() < CACHE_DURATION {
-                return Ok(Json(ApiResponse {
-                    success: true,
-                    data: Some(option_chain.clone()),
-                    error: None,
-                    processing_time_ms: Some(start_time.elapsed().as_millis() as u64),
-                }));
+                // Process the cached data
+                // Get underlying value from first available data point
+                let underlying_value = option_chain.d.data.iter()
+                    .find_map(|d| d.underlying_value)
+                    .unwrap_or(0.0);
+                    
+                match processor::process_mcx_option_data(
+                    option_chain.d.data.clone(),
+                    underlying_value,
+                    &query.expiry,
+                ) {
+                    Ok((processed_data, spread, days_to_expiry, ce_oi, pe_oi)) => {
+                        let response = processor::create_single_analysis_response(
+                            query.commodity.clone(),
+                            option_chain.d.summary.as_on.clone().unwrap_or_else(|| "".to_string()),
+                            underlying_value,
+                            processed_data,
+                            spread,
+                            days_to_expiry,
+                            ce_oi,
+                            pe_oi,
+                        );
+                        
+                        return Ok(Json(ApiResponse {
+                            success: true,
+                            data: Some(response),
+                            error: None,
+                            processing_time_ms: Some(start_time.elapsed().as_millis() as u64),
+                        }));
+                    }
+                    Err(e) => {
+                        return Ok(Json(ApiResponse {
+                            success: false,
+                            data: None,
+                            error: Some(format!("Failed to process option chain data: {}", e)),
+                            processing_time_ms: Some(start_time.elapsed().as_millis() as u64),
+                        }));
+                    }
+                }
             }
         }
     }
@@ -221,12 +255,43 @@ async fn get_option_chain(
                 );
             }
 
-            Ok(Json(ApiResponse {
-                success: true,
-                data: Some(option_chain),
-                error: None,
-                processing_time_ms: Some(start_time.elapsed().as_millis() as u64),
-            }))
+            // Process the data
+            // Get underlying value from first available data point
+            let underlying_value = option_chain.d.data.iter()
+                .find_map(|d| d.underlying_value)
+                .unwrap_or(0.0);
+                
+            match processor::process_mcx_option_data(
+                option_chain.d.data.clone(),
+                underlying_value,
+                &query.expiry,
+            ) {
+                Ok((processed_data, spread, days_to_expiry, ce_oi, pe_oi)) => {
+                    let response = processor::create_single_analysis_response(
+                        query.commodity.clone(),
+                        option_chain.d.summary.as_on.clone().unwrap_or_else(|| "".to_string()),
+                        underlying_value,
+                        processed_data,
+                        spread,
+                        days_to_expiry,
+                        ce_oi,
+                        pe_oi,
+                    );
+                    
+                    Ok(Json(ApiResponse {
+                        success: true,
+                        data: Some(response),
+                        error: None,
+                        processing_time_ms: Some(start_time.elapsed().as_millis() as u64),
+                    }))
+                }
+                Err(e) => Ok(Json(ApiResponse {
+                    success: false,
+                    data: None,
+                    error: Some(format!("Failed to process option chain data: {}", e)),
+                    processing_time_ms: Some(start_time.elapsed().as_millis() as u64),
+                }))
+            }
         }
         Err(e) => Ok(Json(ApiResponse {
             success: false,
@@ -282,7 +347,7 @@ async fn run_batch_analysis(
         .fetch_all_option_chains(filtered_tickers.clone(), max_concurrent)
         .await;
 
-    // Step 4: Process results
+    // Step 4: Process results and apply processor
     let mut batch_results = Vec::new();
     let mut successful_count = 0;
     let mut failed_count = 0;
@@ -290,18 +355,51 @@ async fn run_batch_analysis(
     for (ticker, result) in filtered_tickers.iter().zip(results.iter()) {
         match result {
             Ok((_, chain)) => {
-                successful_count += 1;
-                batch_results.push(BatchResult {
-                    ticker: ticker.clone(),
-                    option_chain: Some(chain.clone()),
-                    error: None,
-                });
+                // Process the MCX option chain data
+                // Get underlying value from first available data point  
+                let underlying_value = chain.d.data.iter()
+                    .find_map(|d| d.underlying_value)
+                    .unwrap_or(0.0);
+                    
+                match processor::process_mcx_option_data(
+                    chain.d.data.clone(),
+                    underlying_value,
+                    &ticker.expiry_date,
+                ) {
+                    Ok((processed_data, spread, days_to_expiry, ce_oi, pe_oi)) => {
+                        let processed_response = processor::create_single_analysis_response(
+                            ticker.symbol.clone(),
+                            chain.d.summary.as_on.clone().unwrap_or_else(|| "".to_string()),
+                            underlying_value,
+                            processed_data,
+                            spread,
+                            days_to_expiry,
+                            ce_oi,
+                            pe_oi,
+                        );
+                        
+                        successful_count += 1;
+                        batch_results.push(BatchResult {
+                            ticker: ticker.clone(),
+                            processed_data: Some(processed_response),
+                            error: None,
+                        });
+                    }
+                    Err(e) => {
+                        failed_count += 1;
+                        batch_results.push(BatchResult {
+                            ticker: ticker.clone(),
+                            processed_data: None,
+                            error: Some(format!("Processing error: {}", e)),
+                        });
+                    }
+                }
             }
             Err(e) => {
                 failed_count += 1;
                 batch_results.push(BatchResult {
                     ticker: ticker.clone(),
-                    option_chain: None,
+                    processed_data: None,
                     error: Some(e.to_string()),
                 });
             }
@@ -565,10 +663,10 @@ pub async fn start_mcx_server(port: u16) -> Result<()> {
     println!("📋 Available MCX endpoints:");
     println!("   GET  /health");
     println!("   GET  /api/mcx/tickers");
-    println!("   GET  /api/mcx/option-chain?commodity=COPPER&expiry=23DEC2025");
+    println!("   GET  /api/mcx/option-chain?commodity=COPPER&expiry=23DEC2025 (Processed Data)");
     println!("   GET  /api/mcx/future-quote?commodity=ALUMINI&expiry=31DEC2025");
     println!("   GET  /api/mcx/option-quote?commodity=COPPER&expiry=23DEC2025&option_type=CE&strike_price=1120.00");
-    println!("   POST /api/mcx/batch-analysis (Latest Expiry Only)");
+    println!("   POST /api/mcx/batch-analysis (Latest Expiry Only - Processed Data)");
     println!("   GET  /api/mcx/future-symbols");
     println!("   GET  /api/mcx/historic-data?symbol=COPPER&expiry=23DEC2025&from_date=20251215&to_date=20251219");
     println!();

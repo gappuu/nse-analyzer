@@ -1,0 +1,443 @@
+use super::models::{ OptionData as McxOptionData};
+use serde::{Deserialize, Serialize};
+use chrono::{NaiveDate, Local};
+use anyhow::{Result, anyhow};
+
+/// Enhanced MCX option detail with computed fields
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProcessedMcxOptionDetail {
+    pub strike_price: f64,
+    pub underlying_value: f64,
+    pub open_interest: Option<f64>,
+    pub volume: Option<f64>,
+    pub last_price: Option<f64>,
+    pub bid_price: Option<f64>,
+    pub ask_price: Option<f64>,
+    pub change: Option<f64>,
+    pub change_percent: Option<f64>,
+    pub change_in_oi: Option<f64>,
+    
+    // Computed fields
+    pub the_money: String,  // "ATM", "1 ITM", "2 OTM", etc.
+    pub tambu: Option<String>,  // "TMJ", "TMG", or None
+    pub time_val: f64,
+    pub days_to_expiry: i32,
+    pub oi_rank: Option<u32>,
+}
+
+/// Processed MCX option data with enhanced CE and PE
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProcessedMcxOptionData {
+    pub strike_price: f64,
+    pub expiry_date: Option<String>,
+    pub call: Option<ProcessedMcxOptionDetail>,
+    pub put: Option<ProcessedMcxOptionDetail>,
+    pub days_to_expiry: i32,
+}
+
+/// Single Analysis Response for MCX (matching NSE structure)
+#[derive(Debug, Serialize)]
+pub struct McxSingleAnalysisResponse {
+    pub symbol: String,
+    pub timestamp: String,
+    pub underlying_value: f64,
+    pub spread: f64,
+    pub days_to_expiry: i32,
+    pub ce_oi: f64,
+    pub pe_oi: f64,
+    pub processed_data: Vec<ProcessedMcxOptionData>,
+    pub alerts: Option<String>, // Placeholder for future rules implementation
+}
+
+/// Calculate days to expiry from today's date for MCX format
+pub fn calculate_days_to_expiry(expiry_date_str: &str) -> Result<i32> {
+    // Parse MCX expiry date format (e.g., "23DEC2025")
+    let expiry_date = NaiveDate::parse_from_str(expiry_date_str, "%d%b%Y")
+        .map_err(|e| anyhow!("Failed to parse expiry date '{}': {}", expiry_date_str, e))?;
+    
+    // Get today's date
+    let today = Local::now().date_naive();
+    
+    // Calculate difference in days
+    let days_diff = (expiry_date - today).num_days() as i32;
+    
+    // Check if today is after expiry (should not happen)
+    if days_diff < 0 {
+        return Err(anyhow!(
+            "Current date ({}) is after expiry date ({}). Days difference: {}",
+            today, expiry_date, days_diff
+        ));
+    }
+    
+    Ok(days_diff)
+}
+
+/// Calculate OI rankings for CE and PE options separately
+pub fn calculate_oi_rankings(data: &mut [McxOptionData]) {
+    // Collect all CE options with their indices for ranking
+    let mut ce_options: Vec<(usize, f64)> = Vec::new();
+    let mut pe_options: Vec<(usize, f64)> = Vec::new();
+    
+    // Gather CE and PE options with valid OI
+    for (i, opt) in data.iter().enumerate() {
+        if let Some(ce_oi) = opt.ce_open_interest {
+            ce_options.push((i, ce_oi as f64));
+        }
+        
+        if let Some(pe_oi) = opt.pe_open_interest {
+            pe_options.push((i, pe_oi as f64));
+        }
+    }
+    
+    // Sort CE options by OI in descending order (highest first)
+    ce_options.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    
+    // Sort PE options by OI in descending order (highest first)
+    pe_options.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    
+    // Note: MCX data structure doesn't have oi_rank field in the raw data,
+    // so we'll calculate it in the processed data
+}
+
+/// Process MCX option chain data
+pub fn process_mcx_option_data(
+    mut data: Vec<McxOptionData>,
+    underlying_value: f64,
+    expiry_date: &str,
+) -> Result<(Vec<ProcessedMcxOptionData>, f64, i32, f64, f64)> {
+    // Calculate days to expiry
+    let days_to_expiry = calculate_days_to_expiry(expiry_date)?;
+    
+    // Step 1: Identify ATM strike
+    let atm_strike = find_atm_strike(&data, underlying_value);
+    
+    // Step 2: Calculate spread from available strikes
+    let spread = calculate_spread(&data, atm_strike);
+    
+    // Step 3: Collect all available strikes for indexing
+    let mut available_strikes: Vec<f64> = data
+        .iter()
+        .filter_map(|opt| opt.ce_strike_price)
+        .collect();
+    available_strikes.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    available_strikes.dedup();
+    
+    // Step 4: Calculate OI rankings
+    calculate_oi_rankings(&mut data);
+    
+    // Step 5: Process each strike with classifications
+    let mut processed: Vec<ProcessedMcxOptionData> = Vec::new();
+    let mut processed_strikes = std::collections::HashSet::new();
+    
+    for opt in data.iter() {
+        let strike = opt.ce_strike_price.unwrap_or(0.0);
+        
+        // Skip duplicate strikes
+        if processed_strikes.contains(&(strike as i64)) {
+            continue;
+        }
+        processed_strikes.insert(strike as i64);
+        
+        let call_detail = if opt.ce_open_interest.is_some() {
+            Some(ProcessedMcxOptionDetail {
+                strike_price: strike,
+                underlying_value,
+                open_interest: opt.ce_open_interest.map(|x| x as f64),
+                volume: opt.ce_volume.map(|x| x as f64),
+                last_price: opt.ce_ltp,
+                bid_price: opt.ce_bid_price,
+                ask_price: opt.ce_ask_price,
+                change: opt.ce_absolute_change,
+                change_percent: opt.ce_net_change,
+                change_in_oi: opt.ce_change_in_oi.map(|x| x as f64),
+                the_money: classify_money_with_distance(strike, atm_strike, &available_strikes, true),
+                tambu: calculate_tambu(
+                    opt.ce_change_in_oi.map(|x| x as f64),
+                    opt.ce_open_interest.map(|x| x as f64),
+                    opt.ce_net_change
+                ),
+                time_val: calculate_time_value(opt.ce_ltp, strike, underlying_value, true),
+                days_to_expiry,
+                oi_rank: None, // Will be calculated separately if needed
+            })
+        } else {
+            None
+        };
+        
+        let put_detail = if opt.pe_open_interest.is_some() {
+            Some(ProcessedMcxOptionDetail {
+                strike_price: strike,
+                underlying_value,
+                open_interest: opt.pe_open_interest.map(|x| x as f64),
+                volume: opt.pe_volume.map(|x| x as f64),
+                last_price: opt.pe_ltp,
+                bid_price: opt.pe_bid_price,
+                ask_price: opt.pe_ask_price,
+                change: opt.pe_absolute_change,
+                change_percent: opt.pe_net_change,
+                change_in_oi: opt.pe_change_in_oi.map(|x| x as f64),
+                the_money: classify_money_with_distance(strike, atm_strike, &available_strikes, false),
+                tambu: calculate_tambu(
+                    opt.pe_change_in_oi.map(|x| x as f64),
+                    opt.pe_open_interest.map(|x| x as f64),
+                    opt.pe_net_change
+                ),
+                time_val: calculate_time_value(opt.pe_ltp, strike, underlying_value, false),
+                days_to_expiry,
+                oi_rank: None, // Will be calculated separately if needed
+            })
+        } else {
+            None
+        };
+        
+        if call_detail.is_some() || put_detail.is_some() {
+            processed.push(ProcessedMcxOptionData {
+                strike_price: strike,
+                expiry_date: Some(expiry_date.to_string()),
+                call: call_detail,
+                put: put_detail,
+                days_to_expiry,
+            });
+        }
+    }
+    
+    // Step 6: Filter to ATM ±6 strikes + high OI outliers
+    filter_strikes(&mut processed, atm_strike);
+    
+    // Calculate total CE and PE OI by summing all values (MCX doesn't provide summary totals like NSE)
+    let ce_oi: f64 = processed.iter()
+        .filter_map(|opt| opt.call.as_ref()?.open_interest)
+        .sum();
+    
+    let pe_oi: f64 = processed.iter()
+        .filter_map(|opt| opt.put.as_ref()?.open_interest)
+        .sum();
+    
+    Ok((processed, spread, days_to_expiry, ce_oi, pe_oi))
+}
+
+/// Find ATM strike (closest to underlying, prefer floor)
+pub fn find_atm_strike(data: &[McxOptionData], underlying_value: f64) -> f64 {
+    let mut closest_strike = 0.0;
+    let mut min_distance = f64::MAX;
+    
+    for opt in data {
+        if let Some(strike) = opt.ce_strike_price {
+            let distance = (strike - underlying_value).abs();
+            
+            // If same distance, prefer lower strike (floor)
+            if distance < min_distance || (distance == min_distance && strike < closest_strike) {
+                min_distance = distance;
+                closest_strike = strike;
+            }
+        }
+    }
+    
+    closest_strike
+}
+
+/// Calculate spread using ATM strike and next higher strike
+pub fn calculate_spread(data: &[McxOptionData], atm_strike: f64) -> f64 {
+    // Get all strike prices and sort them
+    let mut strikes: Vec<f64> = data
+        .iter()
+        .filter_map(|opt| opt.ce_strike_price)
+        .collect();
+    strikes.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    strikes.dedup();
+    
+    // Find the position of ATM strike
+    if let Some(atm_pos) = strikes.iter().position(|&s| s == atm_strike) {
+        // If there's a next higher strike, calculate spread
+        if atm_pos + 1 < strikes.len() {
+            return strikes[atm_pos + 1] - atm_strike;
+        }
+    }
+    
+    // Fallback: calculate average spread if ATM is not found or is the highest
+    if strikes.len() >= 2 {
+        let total_diff: f64 = strikes.windows(2).map(|w| w[1] - w[0]).sum();
+        total_diff / (strikes.len() - 1) as f64
+    } else {
+        0.0
+    }
+}
+
+/// Classify option as ATM, N ITM, or N OTM with distance calculation using strike indexing
+pub fn classify_money_with_distance(
+    strike: f64, 
+    atm_strike: f64, 
+    available_strikes: &[f64], 
+    is_call: bool
+) -> String {
+    if strike == atm_strike {
+        "ATM".to_string()
+    } else {
+        // Find the index positions of current strike and ATM strike
+        let atm_index = available_strikes.iter().position(|&s| s == atm_strike);
+        let strike_index = available_strikes.iter().position(|&s| s == strike);
+        
+        if let (Some(atm_idx), Some(strike_idx)) = (atm_index, strike_index) {
+            // Calculate distance based on index difference
+            let distance = (strike_idx as i32 - atm_idx as i32).abs();
+            
+            if is_call {
+                // Call: Above ATM = OTM, Below ATM = ITM
+                if strike > atm_strike {
+                    format!("{} OTM", distance)
+                } else {
+                    format!("{} ITM", distance)
+                }
+            } else {
+                // Put: Above ATM = ITM, Below ATM = OTM
+                if strike > atm_strike {
+                    format!("{} ITM", distance)
+                } else {
+                    format!("{} OTM", distance)
+                }
+            }
+        } else {
+            // Fallback if strike not found in list
+            if is_call {
+                if strike > atm_strike { "OTM".to_string() } else { "ITM".to_string() }
+            } else {
+                if strike > atm_strike { "ITM".to_string() } else { "OTM".to_string() }
+            }
+        }
+    }
+}
+
+/// Calculate Tambu classification for MCX
+pub fn calculate_tambu(change_in_oi: Option<f64>, open_interest: Option<f64>, pchange: Option<f64>) -> Option<String> {
+    let change_in_oi_val = change_in_oi.unwrap_or(0.0);
+    let open_interest_val = open_interest.unwrap_or(0.0);
+    let pchange_val = pchange.unwrap_or(0.0);
+    
+    // Calculate pchange_in_oi = (change_in_oi / (open_interest + change_in_oi)) * 100
+    let pchange_in_oi = if open_interest_val + change_in_oi_val != 0.0 {
+        (change_in_oi_val / (open_interest_val + change_in_oi_val)) * 100.0
+    } else {
+        0.0
+    };
+    
+    // TMJ: pchange_in_oi > 30% AND pchange < -15%
+    if pchange_in_oi > 30.0 && pchange_val < -15.0 {
+        return Some("TMJ".to_string());
+    }
+    
+    // TMG: pchange_in_oi < -10% AND pchange > 15%
+    if pchange_in_oi < -10.0 && pchange_val > 15.0 {
+        return Some("TMG".to_string());
+    }
+    
+    None
+}
+
+/// Calculate time value for MCX options
+pub fn calculate_time_value(
+    last_price: Option<f64>,
+    strike: f64,
+    underlying_value: f64,
+    is_call: bool,
+) -> f64 {
+    let ltp = last_price.unwrap_or(0.0);
+    
+    if is_call {
+        // CE: Time_val = lastPrice - (underlyingValue - strikePrice) if underlyingValue > strikePrice
+        //     otherwise Time_val = lastPrice
+        if underlying_value > strike {
+            ltp - (underlying_value - strike)
+        } else {
+            ltp
+        }
+    } else {
+        // PE: Time_val = lastPrice - (strikePrice - underlyingValue) if strikePrice > underlyingValue
+        //     otherwise Time_val = lastPrice
+        if strike > underlying_value {
+            ltp - (strike - underlying_value)
+        } else {
+            ltp
+        }
+    }
+}
+
+/// Filter to ATM ±6 strikes plus high OI outliers
+pub fn filter_strikes(processed: &mut Vec<ProcessedMcxOptionData>, atm_strike: f64) {
+    // Sort by strike price
+    processed.sort_by(|a, b| {
+        a.strike_price.partial_cmp(&b.strike_price).unwrap()
+    });
+    
+    // Find ATM index
+    let atm_index = processed
+        .iter()
+        .position(|opt| opt.strike_price == atm_strike)
+        .unwrap_or(0);
+    
+    // Select ATM ±6 strikes (13 total)
+    let start = atm_index.saturating_sub(6);
+    let end = (atm_index + 7).min(processed.len());
+    
+    // Find max OI in selected range
+    let max_oi_in_range = processed[start..end]
+        .iter()
+        .map(|opt| get_max_oi(opt))
+        .fold(0.0, f64::max);
+    
+    // Collect indices to keep
+    let indices_to_keep: Vec<usize> = (0..processed.len())
+        .filter(|&idx| {
+            // Keep if in selected range
+            if idx >= start && idx < end {
+                return true;
+            }
+            
+            // Keep if OI exceeds max in selected range
+            get_max_oi(&processed[idx]) > max_oi_in_range
+        })
+        .collect();
+    
+    // Keep only selected strikes
+    let mut new_processed = Vec::new();
+    for idx in indices_to_keep {
+        new_processed.push(processed[idx].clone());
+    }
+    *processed = new_processed;
+}
+
+/// Get maximum OI from CE or PE for a strike
+pub fn get_max_oi(opt: &ProcessedMcxOptionData) -> f64 {
+    let ce_oi = opt.call.as_ref()
+        .and_then(|c| c.open_interest)
+        .unwrap_or(0.0);
+
+    let pe_oi = opt.put.as_ref()
+        .and_then(|p| p.open_interest)
+        .unwrap_or(0.0);
+
+    ce_oi.max(pe_oi)
+}
+
+/// Create MCX Single Analysis Response from processed data (matching NSE API structure)
+pub fn create_single_analysis_response(
+    symbol: String,
+    timestamp: String,
+    underlying_value: f64,
+    processed_data: Vec<ProcessedMcxOptionData>,
+    spread: f64,
+    days_to_expiry: i32,
+    ce_oi: f64,
+    pe_oi: f64,
+) -> McxSingleAnalysisResponse {
+    McxSingleAnalysisResponse {
+        symbol,
+        timestamp,
+        underlying_value,
+        spread,
+        days_to_expiry,
+        ce_oi,
+        pe_oi,
+        processed_data,
+        alerts: None, // Placeholder for future rules implementation
+    }
+}

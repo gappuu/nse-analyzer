@@ -3,6 +3,7 @@ pub mod models;
 pub mod mcx_client;
 pub mod mcx_api_server;
 pub mod mcx_commands;
+pub mod processor;
 
 // Re-export commonly used items
 pub use mcx_client::MCXClient;
