@@ -642,8 +642,8 @@ impl MCXClient {
         }
     }
 
-    /// Fetch option quote for specific commodity and expiry
-    pub async fn fetch_option_quote(
+    /// Fetch futures quote for specific commodity and expiry
+    pub async fn fetch_future_quote(
         &self,
         commodity: &str,
         expiry: &str,
