@@ -73,36 +73,9 @@ pub fn calculate_days_to_expiry(expiry_date_str: &str) -> Result<i32> {
     Ok(days_diff)
 }
 
-/// Calculate OI rankings for CE and PE options separately
-pub fn calculate_oi_rankings(data: &mut [McxOptionData]) {
-    // Collect all CE options with their indices for ranking
-    let mut ce_options: Vec<(usize, f64)> = Vec::new();
-    let mut pe_options: Vec<(usize, f64)> = Vec::new();
-    
-    // Gather CE and PE options with valid OI
-    for (i, opt) in data.iter().enumerate() {
-        if let Some(ce_oi) = opt.ce_open_interest {
-            ce_options.push((i, ce_oi as f64));
-        }
-        
-        if let Some(pe_oi) = opt.pe_open_interest {
-            pe_options.push((i, pe_oi as f64));
-        }
-    }
-    
-    // Sort CE options by OI in descending order (highest first)
-    ce_options.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    
-    // Sort PE options by OI in descending order (highest first)
-    pe_options.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    
-    // Note: MCX data structure doesn't have oi_rank field in the raw data,
-    // so we'll calculate it in the processed data
-}
-
 /// Process MCX option chain data
 pub fn process_mcx_option_data(
-    mut data: Vec<McxOptionData>,
+    data: Vec<McxOptionData>,
     underlying_value: f64,
     expiry_date: &str,
 ) -> Result<(Vec<ProcessedMcxOptionData>, f64, i32, f64, f64)> {
@@ -124,7 +97,7 @@ pub fn process_mcx_option_data(
     available_strikes.dedup();
     
     // Step 4: Calculate OI rankings
-    calculate_oi_rankings(&mut data);
+    // calculate_oi_rankings(&mut data);
     
     // Step 5: Process each strike with classifications
     let mut processed: Vec<ProcessedMcxOptionData> = Vec::new();
@@ -207,6 +180,9 @@ pub fn process_mcx_option_data(
             });
         }
     }
+    
+    // Step 5: Calculate OI rankings for processed data
+    calculate_processed_oi_rankings(&mut processed);
     
     // Step 6: Filter to ATM ±6 strikes + high OI outliers
     filter_strikes(&mut processed, atm_strike);
@@ -310,6 +286,48 @@ pub fn classify_money_with_distance(
             } else {
                 if strike > atm_strike { "ITM".to_string() } else { "OTM".to_string() }
             }
+        }
+    }
+}
+
+/// Calculate OI rankings for processed CE and PE options separately
+pub fn calculate_processed_oi_rankings(processed: &mut [ProcessedMcxOptionData]) {
+    // Collect all CE options with their indices and OI values for ranking
+    let mut ce_options: Vec<(usize, f64)> = Vec::new();
+    let mut pe_options: Vec<(usize, f64)> = Vec::new();
+    
+    // Gather CE and PE options with valid OI
+    for (i, opt) in processed.iter().enumerate() {
+        if let Some(ref call) = opt.call {
+            if let Some(oi) = call.open_interest {
+                ce_options.push((i, oi));
+            }
+        }
+        
+        if let Some(ref put) = opt.put {
+            if let Some(oi) = put.open_interest {
+                pe_options.push((i, oi));
+            }
+        }
+    }
+    
+    // Sort CE options by OI in descending order (highest first)
+    ce_options.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    
+    // Sort PE options by OI in descending order (highest first)
+    pe_options.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    
+    // Assign ranks to CE options
+    for (rank, &(data_index, _)) in ce_options.iter().enumerate() {
+        if let Some(ref mut call) = processed[data_index].call {
+            call.oi_rank = Some((rank + 1) as u32);
+        }
+    }
+    
+    // Assign ranks to PE options
+    for (rank, &(data_index, _)) in pe_options.iter().enumerate() {
+        if let Some(ref mut put) = processed[data_index].put {
+            put.oi_rank = Some((rank + 1) as u32);
         }
     }
 }
