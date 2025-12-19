@@ -1,153 +1,307 @@
-use crate::config;
-use crate::models::*;
-use anyhow::{anyhow, Context, Result};
-use chrono::{Local, NaiveDate, NaiveTime};
-use rand::{seq::SliceRandom, thread_rng};
-use regex::Regex;
-use reqwest::{header, Client, StatusCode};
-use serde_json::Value;
-use std::collections::HashMap;
+use super::config;
+use super::models::{Ticker, OptionChainResponse};
+use anyhow::{anyhow, Result};
+use chrono::{Datelike, NaiveDate, Utc, Weekday};
+use reqwest::{Client, StatusCode};
+use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{Semaphore, RwLock};
+use tokio::sync::Semaphore;
 use tokio_retry::strategy::ExponentialBackoff;
 use tokio_retry::Retry;
 
 // -----------------------------------------------
-// MCX CLIENT WRAPPER WITH SESSION STATE
+// BHAVCOPY API STRUCTURES
 // -----------------------------------------------
-pub struct McxClient {
-    client: Client,
-    warmed_up: Arc<RwLock<bool>>,
+
+#[derive(Debug, Clone, Deserialize)]
+struct BhavCopyResponse {
+    d: BhavCopyData,
 }
 
-impl McxClient {
+#[derive(Debug, Clone, Deserialize)]
+struct BhavCopyData {
+    #[serde(rename = "Summary")]
+    summary: BhavCopySummary,
+    #[serde(rename = "Data")]
+    data: Vec<BhavCopyEntry>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct BhavCopySummary {
+    #[serde(rename = "AsOn")]
+    as_on: String,
+    #[serde(rename = "Count")]
+    count: i32,
+    // #[serde(rename = "Status")]
+    // status: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct BhavCopyEntry {
+    // #[serde(rename = "Date")]
+    // date: String,
+    #[serde(rename = "Symbol")]
+    symbol: String,
+    #[serde(rename = "ExpiryDate")]
+    expiry_date: String,
+    // #[serde(rename = "Open")]
+    // open: f64,
+    // #[serde(rename = "High")]
+    // high: f64,
+    // #[serde(rename = "Low")]
+    // low: f64,
+    // #[serde(rename = "Close")]
+    // close: f64,
+    // #[serde(rename = "PreviousClose")]
+    // previous_close: f64,
+    // #[serde(rename = "Volume")]
+    // volume: i64,
+    // #[serde(rename = "VolumeInThousands")]
+    // volume_in_thousands: String,
+    // #[serde(rename = "Value")]
+    // value: f64,
+    // #[serde(rename = "OpenInterest")]
+    // open_interest: i64,
+    // #[serde(rename = "DateDisplay")]
+    // date_display: String,
+    #[serde(rename = "InstrumentName")]
+    instrument_name: String,
+    // #[serde(rename = "StrikePrice")]
+    // strike_price: f64,
+    // #[serde(rename = "OptionType")]
+    // option_type: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct BhavCopyPayload {
+    #[serde(rename = "Date")]
+    date: String,
+    #[serde(rename = "InstrumentName")]
+    instrument_name: String,
+}
+
+// -----------------------------------------------
+// MCX CLIENT USING OFFICIAL API
+// -----------------------------------------------
+pub struct MCXClient {
+    client: Client,
+}
+
+impl MCXClient {
     pub fn new() -> Result<Self> {
-        Ok(Self {
-            client: build_mcx_client()?,
-            warmed_up: Arc<RwLock::new(false)),
-        })
+        let client = Client::builder()
+            .cookie_store(true)
+            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+            .timeout(Duration::from_secs(30))
+            .redirect(reqwest::redirect::Policy::limited(10))
+            .gzip(true)
+            .build()?;
+        
+        Ok(Self { client })
     }
 
-    /// Warmup MCX session (only once per client)
-    async fn warmup_if_needed(&self) -> Result<()> {
-        // Check if already warmed up
-        if *self.warmed_up.read().await {
-            return Ok(());
-        }
-
-        // Acquire write lock and warmup
-        let mut warmed = self.warmed_up.write().await;
-        if !*warmed {
-            // First, visit the main page to establish session
-            let _ = self.client
-                .get("https://www.mcxindia.com")
-                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
-                .header("Accept-Encoding", "gzip, deflate, br")
-                .header("Accept-Language", "en-US,en;q=0.9")
-                .header("Cache-Control", "no-cache")
-                .header("Pragma", "no-cache")
-                .header("Sec-Ch-Ua", "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"")
-                .header("Sec-Ch-Ua-Mobile", "?0")
-                .header("Sec-Ch-Ua-Platform", "\"Windows\"")
-                .header("Sec-Fetch-Dest", "document")
-                .header("Sec-Fetch-Mode", "navigate")
-                .header("Sec-Fetch-Site", "none")
-                .header("Sec-Fetch-User", "?1")
-                .header("Upgrade-Insecure-Requests", "1")
-                .send()
-                .await
-                .context("Failed to warm up MCX main page")?;
-            
-            tokio::time::sleep(Duration::from_millis(1000)).await;
-            
-            // Then visit the option chain page to get cookies/session
-            let _ = self.client
-                .get("https://www.mcxindia.com/market-data/option-chain")
-                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
-                .header("Accept-Encoding", "gzip, deflate, br")
-                .header("Accept-Language", "en-US,en;q=0.9")
-                .header("Cache-Control", "no-cache")
-                .header("Pragma", "no-cache")
-                .header("Referer", "https://www.mcxindia.com/")
-                .header("Sec-Ch-Ua", "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"")
-                .header("Sec-Ch-Ua-Mobile", "?0")
-                .header("Sec-Ch-Ua-Platform", "\"Windows\"")
-                .header("Sec-Fetch-Dest", "document")
-                .header("Sec-Fetch-Mode", "navigate")
-                .header("Sec-Fetch-Site", "same-origin")
-                .header("Sec-Fetch-User", "?1")
-                .header("Upgrade-Insecure-Requests", "1")
-                .send()
-                .await
-                .context("Failed to warm up MCX option chain page")?;
-            
-            tokio::time::sleep(Duration::from_millis(config::WARMUP_DELAY_MS)).await;
-            *warmed = true;
+    /// Get the most recent weekday date for fetching data
+    fn get_data_date() -> String {
+        let today = Utc::now().date_naive();
+        let mut check_date = today - chrono::Duration::days(1);
+        
+        // Find the most recent weekday
+        while check_date.weekday() == Weekday::Sat || check_date.weekday() == Weekday::Sun {
+            check_date = check_date - chrono::Duration::days(1);
         }
         
-        Ok(())
+        check_date.format("%Y%m%d").to_string()
     }
 
-    /// Generic retry fetch with better error handling for MCX
-    async fn fetch_text(&self, url: &str) -> Result<String> {
-        self.warmup_if_needed().await?;
-
-        let backoff = ExponentialBackoff::from_millis(config::RETRY_BASE_DELAY_MS)
-            .factor(config::RETRY_FACTOR)
-            .max_delay(Duration::from_secs(config::RETRY_MAX_DELAY_SECS))
-            .take(config::RETRY_MAX_ATTEMPTS);
-
-        Retry::spawn(backoff, || async {
-            let res = self.client
-                .get(url)
-                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
-                .header("Accept-Encoding", "gzip, deflate, br")
-                .header("Accept-Language", "en-US,en;q=0.9")
-                .header("Cache-Control", "no-cache")
-                .header("Pragma", "no-cache")
-                .header("Referer", "https://www.mcxindia.com/")
-                .header("Sec-Ch-Ua", "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"")
-                .header("Sec-Ch-Ua-Mobile", "?0")
-                .header("Sec-Ch-Ua-Platform", "\"Windows\"")
-                .header("Sec-Fetch-Dest", "document")
-                .header("Sec-Fetch-Mode", "navigate")
-                .header("Sec-Fetch-Site", "same-origin")
-                .header("Upgrade-Insecure-Requests", "1")
-                .send()
-                .await
-                .context("Request send failed")?;
-
-            let status = res.status();
-
-            if status.is_success() {
-                let text = res.text().await.context("Failed to read body")?;
-                Ok(text)
-            } else if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
-                // Retry on server errors and rate limits
-                anyhow::bail!("Retryable error: {}", status)
-            } else {
-                // Fail fast on client errors
-                let body = res.text().await.unwrap_or_default();
-                let preview: String = body.chars().take(200).collect();
-                anyhow::bail!("Client error {}: {}", status, preview)
+    /// Parse epoch timestamp from MCX format to NaiveDate
+    fn parse_epoch_to_date(epoch_str: &str) -> Option<NaiveDate> {
+        // Extract epoch from format "/Date(1766128567354)/"
+        if let Some(start) = epoch_str.find('(') {
+            if let Some(end) = epoch_str.find(')') {
+                if let Ok(epoch_ms) = epoch_str[start + 1..end].parse::<i64>() {
+                    let epoch_secs = epoch_ms / 1000;
+                    if let Some(datetime) = chrono::DateTime::from_timestamp(epoch_secs, 0) {
+                        return Some(datetime.date_naive());
+                    }
+                }
             }
-        })
-        .await
+        }
+        None
     }
 
-    /// Post JSON data to MCX API
-    async fn post_json(&self, url: &str, payload: &Value) -> Result<String> {
-        self.warmup_if_needed().await?;
+    /// Get previous weekday from given date
+    fn get_previous_weekday(date: NaiveDate) -> NaiveDate {
+        let mut prev_date = date - chrono::Duration::days(1);
+        while prev_date.weekday() == Weekday::Sat || prev_date.weekday() == Weekday::Sun {
+            prev_date = prev_date - chrono::Duration::days(1);
+        }
+        prev_date
+    }
 
+    /// Fetch bhav copy data with automatic date fallback
+    async fn fetch_bhav_copy_with_fallback(&self) -> Result<BhavCopyResponse> {
+        let mut data_date = Self::get_data_date();
+        let max_attempts = 5; // Don't go back more than 5 days
+        
+        for attempt in 0..max_attempts {
+            println!("🔍 Trying to fetch MCX data for date: {}", data_date);
+            
+            let payload = BhavCopyPayload {
+                date: data_date.clone(),
+                instrument_name: "OPTFUT".to_string(),
+            };
+
+            let backoff = ExponentialBackoff::from_millis(config::RETRY_BASE_DELAY_MS)
+                .factor(config::RETRY_FACTOR)
+                .max_delay(Duration::from_secs(config::RETRY_MAX_DELAY_SECS))
+                .take(config::RETRY_MAX_ATTEMPTS);
+
+            let result = Retry::spawn(backoff, || async {
+                let res = self.client
+                    .post("https://www.mcxindia.com/backpage.aspx/GetDateWiseBhavCopy")
+                    .header("Accept", "application/json, text/javascript, */*; q=0.01")
+                    .header("Accept-Encoding", "gzip, deflate, br")
+                    .header("Accept-Language", "en-US,en;q=0.9")
+                    .header("Content-Type", "application/json; charset=utf-8")
+                    .header("Cache-Control", "no-cache")
+                    .header("Pragma", "no-cache")
+                    .header("Referer", "https://www.mcxindia.com/market-data/bhavcopy")
+                    .header("Sec-Ch-Ua", "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"")
+                    .header("Sec-Ch-Ua-Mobile", "?0")
+                    .header("Sec-Ch-Ua-Platform", "\"Windows\"")
+                    .header("Sec-Fetch-Dest", "empty")
+                    .header("Sec-Fetch-Mode", "cors")
+                    .header("Sec-Fetch-Site", "same-origin")
+                    .header("X-Requested-With", "XMLHttpRequest")
+                    .json(&payload)
+                    .send()
+                    .await?;
+
+                let status = res.status();
+                if status.is_success() {
+                    let text = res.text().await?;
+                    if text.trim().is_empty() {
+                        anyhow::bail!("Empty response from MCX BhavCopy API");
+                    }
+                    
+                    let response: BhavCopyResponse = serde_json::from_str(&text)
+                        .map_err(|e| anyhow::anyhow!("Failed to parse BhavCopy response: {}", e))?;
+                    
+                    Ok(response)
+                } else if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+                    anyhow::bail!("Retryable error: {}", status)
+                } else {
+                    let body = res.text().await.unwrap_or_default();
+                    let preview: String = body.chars().take(200).collect();
+                    anyhow::bail!("Client error {}: {}", status, preview)
+                }
+            }).await;
+
+            match result {
+                Ok(response) => {
+                    if response.d.summary.count > 0 {
+                        println!("✅ Found {} OPTFUT entries for date {}", response.d.summary.count, data_date);
+                        return Ok(response);
+                    } else {
+                        println!("⚠️  No data found for date {} (count: 0), trying previous date...", data_date);
+                        
+                        // Use AsOn date if available, otherwise calculate previous weekday
+                        if let Some(as_on_date) = Self::parse_epoch_to_date(&response.d.summary.as_on) {
+                            let prev_date = Self::get_previous_weekday(as_on_date);
+                            data_date = prev_date.format("%Y%m%d").to_string();
+                        } else {
+                            // Fallback to manual calculation
+                            if let Ok(current_date) = NaiveDate::parse_from_str(&data_date, "%Y%m%d") {
+                                let prev_date = Self::get_previous_weekday(current_date);
+                                data_date = prev_date.format("%Y%m%d").to_string();
+                            } else {
+                                return Err(anyhow!("Failed to parse date format: {}", data_date));
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    println!("❌ Failed to fetch data for date {}: {}", data_date, e);
+                    if attempt == max_attempts - 1 {
+                        return Err(anyhow!("Failed to fetch MCX data after {} attempts", max_attempts));
+                    }
+                    
+                    // Try previous weekday
+                    if let Ok(current_date) = NaiveDate::parse_from_str(&data_date, "%Y%m%d") {
+                        let prev_date = Self::get_previous_weekday(current_date);
+                        data_date = prev_date.format("%Y%m%d").to_string();
+                    } else {
+                        return Err(anyhow!("Failed to parse date format: {}", data_date));
+                    }
+                }
+            }
+        }
+        
+        Err(anyhow!("Exhausted all attempts to fetch MCX data"))
+    }
+
+    /// Fetch unique symbol-expiry combinations from bhav copy
+    pub async fn fetch_ticker_list(&self) -> Result<Vec<Ticker>> {
+        let bhav_copy = self.fetch_bhav_copy_with_fallback().await?;
+        
+        // Calculate total entries before moving the data
+        let total_entries = bhav_copy.d.data.len();
+        
+        // Use HashSet to ensure uniqueness of Symbol-ExpiryDate combinations
+        let mut unique_entries = HashSet::new();
+        let mut tickers = Vec::new();
+        
+        for entry in bhav_copy.d.data {
+            let symbol = entry.symbol.trim().to_string();
+            let expiry = entry.expiry_date.trim().to_string();
+            let key = (symbol.clone(), expiry.clone());
+            
+            if unique_entries.insert(key) {
+                tickers.push(Ticker {
+                    expiry_date: expiry,
+                    instrument_name: entry.instrument_name,
+                    symbol,
+                    symbol_value: entry.symbol.trim().to_string(),
+                    todays_traded: 1, // Indicates this is from live data
+                });
+            }
+        }
+        
+        // Sort by symbol, then by expiry date
+        tickers.sort_by(|a, b| {
+            match a.symbol.cmp(&b.symbol) {
+                std::cmp::Ordering::Equal => a.expiry_date.cmp(&b.expiry_date),
+                other => other,
+            }
+        });
+        
+        println!("📊 Extracted {} unique symbol-expiry combinations from {} total entries", 
+                 tickers.len(), total_entries);
+        
+        Ok(tickers)
+    }
+
+    /// Fetch option chain data (unchanged from previous implementation)
+    pub async fn fetch_option_chain(
+        &self,
+        commodity: &str,
+        expiry: &str,
+    ) -> Result<OptionChainResponse> {
+        let payload = serde_json::json!({
+            "Commodity": commodity,
+            "Expiry": expiry
+        });
+        
         let backoff = ExponentialBackoff::from_millis(config::RETRY_BASE_DELAY_MS)
             .factor(config::RETRY_FACTOR)
             .max_delay(Duration::from_secs(config::RETRY_MAX_DELAY_SECS))
             .take(config::RETRY_MAX_ATTEMPTS);
 
-        Retry::spawn(backoff, || async {
+        let result = Retry::spawn(backoff, || async {
             let res = self.client
-                .post(url)
+                .post("https://www.mcxindia.com/backpage.aspx/GetOptionChain")
                 .header("Accept", "application/json, text/javascript, */*; q=0.01")
                 .header("Accept-Encoding", "gzip, deflate, br")
                 .header("Accept-Language", "en-US,en;q=0.9")
@@ -162,236 +316,103 @@ impl McxClient {
                 .header("Sec-Fetch-Mode", "cors")
                 .header("Sec-Fetch-Site", "same-origin")
                 .header("X-Requested-With", "XMLHttpRequest")
-                .json(payload)
+                .json(&payload)
                 .send()
-                .await
-                .context("Request send failed")?;
+                .await?;
 
             let status = res.status();
-
             if status.is_success() {
-                let text = res.text().await.context("Failed to read body")?;
-                Ok(text)
-            } else if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
-                // Retry on server errors and rate limits
-                anyhow::bail!("Retryable error: {}", status)
+                let text = res.text().await?;
+                if text.trim().is_empty() || text.contains("error") {
+                    anyhow::bail!("Empty or error response from MCX option chain API");
+                }
+                
+                let response: super::models::McxOptionChainResponse = serde_json::from_str(&text)?;
+                
+                // Convert to legacy format
+                let legacy_response = OptionChainResponse {
+                    d: super::models::OptionChainData {
+                        type_name: response.d.type_name,
+                        extension_data: response.d.extension_data,
+                        data: response.d.data.into_iter().map(|d| super::models::OptionData {
+                            extension_data: d.extension_data,
+                            ce_absolute_change: d.ce_absolute_change,
+                            ce_ask_price: d.ce_ask_price,
+                            ce_ask_qty: d.ce_ask_qty,
+                            ce_bid_price: d.ce_bid_price,
+                            ce_bid_qty: d.ce_bid_qty,
+                            ce_change_in_oi: d.ce_change_in_oi,
+                            ce_ltp: d.ce_ltp,
+                            ce_ltt: d.ce_ltt,
+                            ce_net_change: d.ce_net_change,
+                            ce_open_interest: d.ce_open_interest,
+                            ce_strike_price: d.ce_strike_price,
+                            ce_volume: d.ce_volume,
+                            pe_absolute_change: d.pe_absolute_change,
+                            pe_ask_price: d.pe_ask_price,
+                            pe_ask_qty: d.pe_ask_qty,
+                            pe_bid_price: d.pe_bid_price,
+                            pe_bid_qty: d.pe_bid_qty,
+                            pe_change_in_oi: d.pe_change_in_oi,
+                            pe_ltp: d.pe_ltp,
+                            pe_ltt: d.pe_ltt,
+                            pe_net_change: d.pe_net_change,
+                            pe_open_interest: d.pe_open_interest,
+                            pe_volume: d.pe_volume,
+                            expiry_date: d.expiry_date,
+                            ltt: d.ltt,
+                            symbol: d.symbol,
+                            underlying_value: d.underlying_value,
+                        }).collect(),
+                        summary: super::models::OptionSummary {
+                            extension_data: response.d.summary.extension_data,
+                            as_on: response.d.summary.as_on,
+                            count: response.d.summary.count,
+                            status: response.d.summary.status,
+                        },
+                    },
+                };
+                
+                Ok(legacy_response)
             } else {
-                // Fail fast on client errors
-                let body = res.text().await.unwrap_or_default();
-                let preview: String = body.chars().take(200).collect();
-                anyhow::bail!("Client error {}: {}", status, preview)
+                anyhow::bail!("HTTP error: {}", status)
             }
-        })
-        .await
+        }).await;
+        
+        match result {
+            Ok(response) => {
+                println!("✅ Successfully fetched option chain for {}", commodity);
+                Ok(response)
+            }
+            Err(e) => {
+                println!("❌ Failed to fetch option chain for {}: {} - {}", commodity,expiry, e);
+                Err(e)
+            }
+        }
     }
 
-    // -----------------------------------------------
-    // STEP 1: FETCH MCX SYMBOLS AND CONTRACT INFO
-    // -----------------------------------------------
-    pub async fn fetch_mcx_symbols(&self) -> Result<Vec<McxSymbolData>> {
-        let html = self.fetch_text("https://www.mcxindia.com/market-data/option-chain").await?;
-        
-        // Extract vTick data from script tag using regex
-        let re = Regex::new(r"var vTick=(\[.*?\]);")
-            .context("Failed to compile regex")?;
-        
-        let captures = re.captures(&html)
-            .ok_or_else(|| anyhow!("vTick data not found in HTML"))?;
-        
-        let json_str = captures.get(1)
-            .ok_or_else(|| anyhow!("Failed to extract vTick JSON"))?
-            .as_str();
-        
-        let symbol_data: Vec<McxSymbolData> = serde_json::from_str(json_str)
-            .context("Failed to parse vTick JSON data")?;
-        
-        Ok(symbol_data)
-    }
-
-    /// Get contract info for all symbols (group by symbol with expiry dates)
-    pub async fn fetch_mcx_contract_list(&self) -> Result<Vec<McxContractInfo>> {
-        let symbol_data = self.fetch_mcx_symbols().await?;
-        
-        // Group by symbol to collect all expiry dates
-        let mut symbol_map: HashMap<String, McxContractInfo> = HashMap::new();
-        
-        for data in symbol_data {
-            let entry = symbol_map
-                .entry(data.symbol.clone())
-                .or_insert_with(|| McxContractInfo {
-                    symbol: data.symbol.clone(),
-                    expiry_dates: Vec::new(),
-                    instrument_name: data.instrument_name.clone(),
-                    symbol_value: data.symbol_value.clone(),
-                });
-            
-            if !entry.expiry_dates.contains(&data.expiry_date) {
-                entry.expiry_dates.push(data.expiry_date);
-            }
-        }
-        
-        // Sort expiry dates for each symbol
-        for contract in symbol_map.values_mut() {
-            contract.expiry_dates.sort_by(|a, b| {
-                let date_a = NaiveDate::parse_from_str(a, "%d%b%Y");
-                let date_b = NaiveDate::parse_from_str(b, "%d%b%Y");
-                match (date_a, date_b) {
-                    (Ok(a), Ok(b)) => a.cmp(&b),
-                    _ => a.cmp(b), // Fallback to string comparison
-                }
-            });
-        }
-        
-        Ok(symbol_map.into_values().collect())
-    }
-
-    /// Get contract info for a specific symbol
-    pub async fn fetch_mcx_contract_info(&self, symbol: &str) -> Result<McxContractInfo> {
-        let symbol_data = self.fetch_mcx_symbols().await?;
-        
-        let mut expiry_dates = Vec::new();
-        let mut instrument_name = String::new();
-        let mut symbol_value = String::new();
-        
-        for data in symbol_data {
-            if data.symbol.eq_ignore_ascii_case(symbol) {
-                if !expiry_dates.contains(&data.expiry_date) {
-                    expiry_dates.push(data.expiry_date);
-                }
-                if instrument_name.is_empty() {
-                    instrument_name = data.instrument_name;
-                    symbol_value = data.symbol_value;
-                }
-            }
-        }
-        
-        if expiry_dates.is_empty() {
-            return Err(anyhow!("Symbol '{}' not found", symbol));
-        }
-        
-        // Sort expiry dates
-        expiry_dates.sort_by(|a, b| {
-            let date_a = NaiveDate::parse_from_str(a, "%d%b%Y");
-            let date_b = NaiveDate::parse_from_str(b, "%d%b%Y");
-            match (date_a, date_b) {
-                (Ok(a), Ok(b)) => a.cmp(&b),
-                _ => a.cmp(b), // Fallback to string comparison
-            }
-        });
-        
-        Ok(McxContractInfo {
-            symbol: symbol.to_string(),
-            expiry_dates,
-            instrument_name,
-            symbol_value,
-        })
-    }
-
-    // -----------------------------------------------
-    // STEP 2: FETCH OPTION CHAIN DATA (RAW)
-    // -----------------------------------------------
-    pub async fn fetch_mcx_option_chain_raw(
-        &self,
-        symbol: &str,
-        expiry: &str,
-    ) -> Result<McxOptionChainResponse> {
-        let payload = serde_json::json!({
-            "Commodity": symbol,
-            "Expiry": expiry
-        });
-        
-        let text = self.post_json(
-            "https://www.mcxindia.com/backpage.aspx/GetOptionChain",
-            &payload
-        ).await?;
-        
-        let response: McxOptionChainResponse = serde_json::from_str(&text)
-            .context("Failed to parse MCX option chain response")?;
-        
-        Ok(response)
-    }
-
-    // -----------------------------------------------
-    // HELPER FUNCTION: SELECT APPROPRIATE EXPIRY
-    // -----------------------------------------------
-    fn select_expiry<'a>(expiry_dates: &'a [String]) -> Result<&'a String> {
-        if expiry_dates.is_empty() {
-            return Err(anyhow!("No expiry dates found"));
-        }
-
-        // Parse all dates and keep their original indices
-        let mut parsed: Vec<(NaiveDate, usize)> = Vec::new();
-
-        for (idx, s) in expiry_dates.iter().enumerate() {
-            let d = NaiveDate::parse_from_str(s, "%d%b%Y")
-                .with_context(|| format!("Failed to parse expiry date: {}", s))?;
-            parsed.push((d, idx));
-        }
-
-        // Sort by date (earliest first)
-        parsed.sort_by_key(|(d, _)| *d);
-
-        // Get today's date and current time
-        let now = Local::now();
-        let today = now.date_naive();
-        let current_time = now.time();
-        let cutoff = NaiveTime::from_hms_opt(17, 0, 0).unwrap(); // 17:00 for MCX
-
-        // Apply expiry selection rules
-        for (date, idx) in parsed {
-            if date < today {
-                // Past date → skip, try next
-                continue;
-            }
-
-            if date == today {
-                // Today's expiry
-                if current_time < cutoff {
-                    // Before 17:00 → use today
-                    return Ok(&expiry_dates[idx]);
-                } else {
-                    // After 17:00 → skip today, try next
-                    continue;
-                }
-            }
-
-            // Future date (> today) → use it
-            if date > today {
-                return Ok(&expiry_dates[idx]);
-            }
-        }
-
-        // If we reach here, all expiries were invalid
-        Err(anyhow!("No valid expiry found (all past or after cutoff)"))
-    }
-
-    // -----------------------------------------------
-    // BATCH FETCH WITH CONCURRENCY CONTROL
-    // -----------------------------------------------
-    pub async fn fetch_all_mcx_option_chains(
+    /// Batch fetch all option chains
+    pub async fn fetch_all_option_chains(
         self: Arc<Self>,
-        symbols: Vec<McxContractInfo>,
+        tickers: Vec<Ticker>,
         max_concurrent: usize,
-    ) -> Vec<Result<(McxContractInfo, McxOptionChainResponse)>> {
+    ) -> Vec<Result<(Ticker, OptionChainResponse)>> {
+        println!("📈 Batch fetching {} option chains with {} max concurrent", 
+                 tickers.len(), max_concurrent);
+        
         let semaphore = Arc::new(Semaphore::new(max_concurrent));
         let mut handles = vec![];
 
-        for contract in symbols {
+        for ticker in tickers {
             let client = Arc::clone(&self);
             let sem = Arc::clone(&semaphore);
 
             let handle = tokio::spawn(async move {
-                // Acquire permit
                 let _permit = sem.acquire_owned().await
                     .map_err(|e| anyhow::anyhow!("Semaphore error: {}", e))?;
 
-                // Select appropriate expiry
-                let expiry = Self::select_expiry(&contract.expiry_dates)?;
-
-                // Get option chain (raw)
-                let chain = client.fetch_mcx_option_chain_raw(&contract.symbol, expiry).await?;
-
-                Ok((contract, chain))
+                let chain = client.fetch_option_chain(&ticker.symbol, &ticker.expiry_date).await?;
+                Ok((ticker, chain))
             });
 
             handles.push(handle);
@@ -407,67 +428,31 @@ impl McxClient {
 
         results
     }
+
+    /// Utility methods
+    pub fn get_unique_symbols(tickers: &[Ticker]) -> Vec<String> {
+        let mut symbols: Vec<String> = tickers
+            .iter()
+            .map(|t| t.symbol.clone())
+            .collect();
+        
+        symbols.sort();
+        symbols.dedup();
+        symbols
+    }
+
+    pub fn get_expiries_for_symbol(tickers: &[Ticker], symbol: &str) -> Vec<String> {
+        tickers
+            .iter()
+            .filter(|t| t.symbol == symbol)
+            .map(|t| t.expiry_date.clone())
+            .collect()
+    }
 }
 
-// -----------------------------------------------
-// HTTP CLIENT BUILDER FOR MCX
-// -----------------------------------------------
-fn build_mcx_client() -> Result<Client> {
-    let mut headers = header::HeaderMap::new();
-    
-    // More comprehensive browser headers to avoid detection
-    headers.insert(
-        header::ACCEPT, 
-        header::HeaderValue::from_static("text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
-    );
-    headers.insert(
-        header::ACCEPT_LANGUAGE, 
-        header::HeaderValue::from_static("en-US,en;q=0.9")
-    );
-    headers.insert(
-        header::ACCEPT_ENCODING, 
-        header::HeaderValue::from_static("gzip, deflate, br")
-    );
-    headers.insert(
-        "sec-ch-ua", 
-        header::HeaderValue::from_static("\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"")
-    );
-    headers.insert(
-        "sec-ch-ua-mobile", 
-        header::HeaderValue::from_static("?0")
-    );
-    headers.insert(
-        "sec-ch-ua-platform", 
-        header::HeaderValue::from_static("\"Windows\"")
-    );
-    headers.insert(
-        "sec-fetch-dest", 
-        header::HeaderValue::from_static("document")
-    );
-    headers.insert(
-        "sec-fetch-mode", 
-        header::HeaderValue::from_static("navigate")
-    );
-    headers.insert(
-        "sec-fetch-site", 
-        header::HeaderValue::from_static("none")
-    );
-    headers.insert(
-        "sec-fetch-user", 
-        header::HeaderValue::from_static("?1")
-    );
-    headers.insert(
-        "upgrade-insecure-requests", 
-        header::HeaderValue::from_static("1")
-    );
-
-    Ok(Client::builder()
-        .default_headers(headers)
-        .cookie_store(true) // Critical for MCX session
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
-        .timeout(Duration::from_secs(30))
-        .redirect(reqwest::redirect::Policy::limited(10))
-        .gzip(true)
-        .build()
-        .context("Failed to build MCX HTTP client")?)
+// For development convenience
+impl Default for MCXClient {
+    fn default() -> Self {
+        Self::new().unwrap()
+    }
 }

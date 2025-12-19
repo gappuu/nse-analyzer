@@ -45,6 +45,7 @@ jobs:
       run: |
         # Set environment for batch mode only
         export NSE_MODE=batch
+        export EXCHANGE=nse
         
         # Run the batch analysis and capture output
         ./target/release/nse-analyzer | tee nse_output.log
