@@ -31,6 +31,14 @@ pub struct OptionChainQuery {
     pub expiry: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct HistoricDataQuery {
+    pub symbol: String,
+    pub expiry: String,
+    pub from_date: String,  // Format: YYYYMMDD
+    pub to_date: String,    // Format: YYYYMMDD
+}
+
 #[derive(Debug, Serialize)]
 pub struct ApiResponse<T> {
     pub success: bool,
@@ -83,6 +91,8 @@ pub struct AppState {
 struct Cache {
     ticker_list: Option<(Vec<Ticker>, Instant)>,
     option_chains: HashMap<String, (OptionChainResponse, Instant)>,
+    future_symbols: Option<(serde_json::Value, Instant)>,
+    historic_data: HashMap<String, (serde_json::Value, Instant)>,
 }
 
 const CACHE_DURATION: Duration = Duration::from_secs(300); // 5 minutes
@@ -307,6 +317,101 @@ async fn run_batch_analysis(
     }))
 }
 
+/// GET /api/mcx/future-symbols - Get available future symbols and expiry dates
+async fn get_future_symbols(State(app_state): State<AppState>) -> Result<Json<ApiResponse<serde_json::Value>>, StatusCode> {
+    let start_time = Instant::now();
+
+    // Check cache first
+    {
+        let cache = app_state.cache.read().await;
+        if let Some((data, cached_at)) = &cache.future_symbols {
+            if cached_at.elapsed() < CACHE_DURATION {
+                return Ok(Json(ApiResponse {
+                    success: true,
+                    data: Some(data.clone()),
+                    error: None,
+                    processing_time_ms: Some(start_time.elapsed().as_millis() as u64),
+                }));
+            }
+        }
+    }
+
+    // Fetch from MCX API
+    match app_state.client.fetch_future_symbols().await {
+        Ok(data) => {
+            // Update cache
+            {
+                let mut cache = app_state.cache.write().await;
+                cache.future_symbols = Some((data.clone(), Instant::now()));
+            }
+
+            Ok(Json(ApiResponse {
+                success: true,
+                data: Some(data),
+                error: None,
+                processing_time_ms: Some(start_time.elapsed().as_millis() as u64),
+            }))
+        }
+        Err(e) => Ok(Json(ApiResponse {
+            success: false,
+            data: None,
+            error: Some(e.to_string()),
+            processing_time_ms: Some(start_time.elapsed().as_millis() as u64),
+        })),
+    }
+}
+
+/// GET /api/mcx/historic-data?symbol=COPPER&expiry=23DEC2025&from_date=20251215&to_date=20251219 - Get historic data
+async fn get_historic_data(
+    Query(query): Query<HistoricDataQuery>,
+    State(app_state): State<AppState>,
+) -> Result<Json<ApiResponse<serde_json::Value>>, StatusCode> {
+    let start_time = Instant::now();
+    let cache_key = format!("historic_{}_{}_{}_{}", query.symbol, query.expiry, query.from_date, query.to_date);
+
+    // Check cache first
+    {
+        let cache = app_state.cache.read().await;
+        if let Some((data, cached_at)) = cache.historic_data.get(&cache_key) {
+            if cached_at.elapsed() < CACHE_DURATION {
+                return Ok(Json(ApiResponse {
+                    success: true,
+                    data: Some(data.clone()),
+                    error: None,
+                    processing_time_ms: Some(start_time.elapsed().as_millis() as u64),
+                }));
+            }
+        }
+    }
+
+    // Fetch from MCX API
+    match app_state.client.fetch_historic_data(&query.symbol, &query.expiry, &query.from_date, &query.to_date).await {
+        Ok(data) => {
+            // Update cache
+            {
+                let mut cache = app_state.cache.write().await;
+                cache.historic_data.insert(
+                    cache_key,
+                    (data.clone(), Instant::now()),
+                );
+            }
+
+            Ok(Json(ApiResponse {
+                success: true,
+                data: Some(data),
+                error: None,
+                processing_time_ms: Some(start_time.elapsed().as_millis() as u64),
+            }))
+        }
+        Err(e) => Ok(Json(ApiResponse {
+            success: false,
+            data: None,
+            error: Some(e.to_string()),
+            processing_time_ms: Some(start_time.elapsed().as_millis() as u64),
+        })),
+    }
+}
+
 // -----------------------------------------------
 // SERVER SETUP
 // -----------------------------------------------
@@ -317,7 +422,9 @@ pub async fn start_mcx_server(port: u16) -> Result<()> {
     let mcx_routes = Router::new()
         .route("/api/mcx/tickers", get(get_ticker_list))
         .route("/api/mcx/option-chain", get(get_option_chain))
-        .route("/api/mcx/batch-analysis", post(run_batch_analysis));
+        .route("/api/mcx/batch-analysis", post(run_batch_analysis))
+        .route("/api/mcx/future-symbols", get(get_future_symbols))
+        .route("/api/mcx/historic-data", get(get_historic_data));
 
     let app = Router::new()
         .route("/health", get(health))
@@ -334,6 +441,8 @@ pub async fn start_mcx_server(port: u16) -> Result<()> {
     println!("   GET  /api/mcx/tickers");
     println!("   GET  /api/mcx/option-chain?commodity=COPPER&expiry=23DEC2025");
     println!("   POST /api/mcx/batch-analysis (Latest Expiry Only)");
+    println!("   GET  /api/mcx/future-symbols");
+    println!("   GET  /api/mcx/historic-data?symbol=COPPER&expiry=23DEC2025&from_date=20251215&to_date=20251219");
     println!();
 
     axum::serve(listener, app).await?;
@@ -346,6 +455,8 @@ pub fn get_mcx_routes() -> Router<AppState> {
         .route("/api/mcx/tickers", get(get_ticker_list))
         .route("/api/mcx/option-chain", get(get_option_chain))
         .route("/api/mcx/batch-analysis", post(run_batch_analysis))
+        .route("/api/mcx/future-symbols", get(get_future_symbols))
+        .route("/api/mcx/historic-data", get(get_historic_data))
 }
 
 /// Get MCX app state for merging with existing server

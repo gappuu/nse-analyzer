@@ -429,6 +429,147 @@ impl MCXClient {
         results
     }
 
+    /// Fetch available future symbols and expiry dates
+    pub async fn fetch_future_symbols(&self) -> Result<serde_json::Value> {
+        let url = "https://www.mcxindia.com/api/ContractAvailableForTrading/StaggeredProductDetailsCurrent";
+        
+        let backoff = ExponentialBackoff::from_millis(config::RETRY_BASE_DELAY_MS)
+            .factor(config::RETRY_FACTOR)
+            .max_delay(Duration::from_secs(config::RETRY_MAX_DELAY_SECS))
+            .take(config::RETRY_MAX_ATTEMPTS);
+
+        let result = Retry::spawn(backoff, || async {
+            let res = self.client
+                .get(url)
+                .header("Accept", "application/json, text/plain, */*")
+                .header("Accept-Encoding", "gzip, deflate, br")
+                .header("Accept-Language", "en-US,en;q=0.9")
+                .header("Cache-Control", "no-cache")
+                .header("Pragma", "no-cache")
+                .header("Referer", "https://www.mcxindia.com/market-data/option-chain")
+                .header("Sec-Ch-Ua", "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"")
+                .header("Sec-Ch-Ua-Mobile", "?0")
+                .header("Sec-Ch-Ua-Platform", "\"Windows\"")
+                .header("Sec-Fetch-Dest", "empty")
+                .header("Sec-Fetch-Mode", "cors")
+                .header("Sec-Fetch-Site", "same-origin")
+                .header("X-Requested-With", "XMLHttpRequest")
+                .query(&[
+                    ("instrumentName", "FUTCOM"),
+                    ("product", "ALL"),
+                    ("productMonth", "ALL"),
+                    ("OptionType", "ALL"),
+                    ("StrikePrice", "ALL"),
+                ])
+                .send()
+                .await?;
+
+            let status = res.status();
+            if status.is_success() {
+                let text = res.text().await?;
+                if text.trim().is_empty() {
+                    anyhow::bail!("Empty response from MCX future symbols API");
+                }
+                
+                let data: serde_json::Value = serde_json::from_str(&text)
+                    .map_err(|e| anyhow::anyhow!("Failed to parse future symbols response: {}", e))?;
+                
+                Ok(data)
+            } else if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+                anyhow::bail!("Retryable error: {}", status)
+            } else {
+                let body = res.text().await.unwrap_or_default();
+                let preview: String = body.chars().take(500).collect();
+                anyhow::bail!("Client error {}: {}", status, preview)
+            }
+        }).await;
+        
+        match result {
+            Ok(data) => {
+                println!("✅ Successfully fetched future symbols data");
+                Ok(data)
+            }
+            Err(e) => {
+                println!("❌ Failed to fetch future symbols data: {}", e);
+                Err(e)
+            }
+        }
+    }
+
+    /// Fetch historic commodity data
+    pub async fn fetch_historic_data(
+        &self,
+        symbol: &str,
+        expiry: &str,
+        from_date: &str,
+        to_date: &str,
+    ) -> Result<serde_json::Value> {
+        let payload = serde_json::json!({
+            "Symbol": symbol,
+            "Expiry": expiry,
+            "FromDate": from_date,
+            "ToDate": to_date,
+            "InstrumentName": "OPTFUT"
+        });
+        
+        let backoff = ExponentialBackoff::from_millis(config::RETRY_BASE_DELAY_MS)
+            .factor(config::RETRY_FACTOR)
+            .max_delay(Duration::from_secs(config::RETRY_MAX_DELAY_SECS))
+            .take(config::RETRY_MAX_ATTEMPTS);
+
+        let result = Retry::spawn(backoff, || async {
+            let res = self.client
+                .post("https://www.mcxindia.com/backpage.aspx/GetCommoditywiseBhavCopy")
+                .header("Accept", "application/json, text/javascript, */*; q=0.01")
+                .header("Accept-Encoding", "gzip, deflate, br")
+                .header("Accept-Language", "en-US,en;q=0.9")
+                .header("Content-Type", "application/json; charset=utf-8")
+                .header("Cache-Control", "no-cache")
+                .header("Pragma", "no-cache")
+                .header("Referer", "https://www.mcxindia.com/market-data/bhavcopy")
+                .header("Sec-Ch-Ua", "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"")
+                .header("Sec-Ch-Ua-Mobile", "?0")
+                .header("Sec-Ch-Ua-Platform", "\"Windows\"")
+                .header("Sec-Fetch-Dest", "empty")
+                .header("Sec-Fetch-Mode", "cors")
+                .header("Sec-Fetch-Site", "same-origin")
+                .header("X-Requested-With", "XMLHttpRequest")
+                .json(&payload)
+                .send()
+                .await?;
+
+            let status = res.status();
+            if status.is_success() {
+                let text = res.text().await?;
+                if text.trim().is_empty() {
+                    anyhow::bail!("Empty response from MCX historic data API");
+                }
+                
+                let data: serde_json::Value = serde_json::from_str(&text)
+                    .map_err(|e| anyhow::anyhow!("Failed to parse historic data response: {}", e))?;
+                
+                Ok(data)
+            } else if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+                anyhow::bail!("Retryable error: {}", status)
+            } else {
+                let body = res.text().await.unwrap_or_default();
+                let preview: String = body.chars().take(200).collect();
+                anyhow::bail!("Client error {}: {}", status, preview)
+            }
+        }).await;
+        
+        match result {
+            Ok(data) => {
+                println!("✅ Successfully fetched historic data for {} {}", symbol, expiry);
+                Ok(data)
+            }
+            Err(e) => {
+                println!("❌ Failed to fetch historic data for {} {}: {}", symbol, expiry, e);
+                Err(e)
+            }
+        }
+    }
+
     /// Parse expiry date string to NaiveDate for comparison
     /// Handles various formats like "23DEC2025", "23-DEC-2025", etc.
     fn parse_expiry_date(expiry_str: &str) -> Result<NaiveDate> {
@@ -519,7 +660,7 @@ impl MCXClient {
             // Log filtering details for this symbol (using metrics calculated earlier)
             if initial_count > 1 {
                 if past_count > 0 || initial_count > 1 {
-                    println!(" {} expiries → 1 (removed {} past)", initial_count, past_count);
+                    println!("  {} expiries → 1 (removed {} past)", initial_count, past_count);
                 }
             }
         }

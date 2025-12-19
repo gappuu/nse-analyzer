@@ -225,8 +225,8 @@ impl MCXCommands {
 
     /// Save batch results to JSON files (with both original and filtered ticker lists)
     async fn save_batch_results(
-        all_tickers: &[super::models::Ticker],
-        filtered_tickers: &[super::models::Ticker],
+        _all_tickers: &[super::models::Ticker],
+        _filtered_tickers: &[super::models::Ticker],
         successful: Vec<(super::models::Ticker, super::models::OptionChainResponse)>,
     ) -> Result<()> {
         println!("{}", "Saving results to JSON files...".cyan());
