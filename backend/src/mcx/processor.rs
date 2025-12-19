@@ -16,6 +16,7 @@ pub struct ProcessedMcxOptionDetail {
     pub change: Option<f64>,
     pub change_percent: Option<f64>,
     pub change_in_oi: Option<f64>,
+    pub pchange_in_oi: Option<f64>, // Calculated percentage change in OI
     
     // Computed fields
     pub the_money: String,  // "ATM", "1 ITM", "2 OTM", etc.
@@ -139,23 +140,26 @@ pub fn process_mcx_option_data(
         processed_strikes.insert(strike as i64);
         
         let call_detail = if opt.ce_open_interest.is_some() {
+            let change_in_oi = opt.ce_change_in_oi.map(|x| x as f64);
+            let open_interest = opt.ce_open_interest.map(|x| x as f64);
+            
+            // Calculate pchange_in_oi
+            let pchange_in_oi = calculate_pchange_in_oi(change_in_oi, open_interest);
+            
             Some(ProcessedMcxOptionDetail {
                 strike_price: strike,
                 underlying_value,
-                open_interest: opt.ce_open_interest.map(|x| x as f64),
+                open_interest,
                 volume: opt.ce_volume.map(|x| x as f64),
                 last_price: opt.ce_ltp,
                 bid_price: opt.ce_bid_price,
                 ask_price: opt.ce_ask_price,
                 change: opt.ce_absolute_change,
                 change_percent: opt.ce_net_change,
-                change_in_oi: opt.ce_change_in_oi.map(|x| x as f64),
+                change_in_oi,
+                pchange_in_oi,
                 the_money: classify_money_with_distance(strike, atm_strike, &available_strikes, true),
-                tambu: calculate_tambu(
-                    opt.ce_change_in_oi.map(|x| x as f64),
-                    opt.ce_open_interest.map(|x| x as f64),
-                    opt.ce_net_change
-                ),
+                tambu: calculate_tambu(pchange_in_oi, opt.ce_net_change),
                 time_val: calculate_time_value(opt.ce_ltp, strike, underlying_value, true),
                 days_to_expiry,
                 oi_rank: None, // Will be calculated separately if needed
@@ -165,23 +169,26 @@ pub fn process_mcx_option_data(
         };
         
         let put_detail = if opt.pe_open_interest.is_some() {
+            let change_in_oi = opt.pe_change_in_oi.map(|x| x as f64);
+            let open_interest = opt.pe_open_interest.map(|x| x as f64);
+            
+            // Calculate pchange_in_oi
+            let pchange_in_oi = calculate_pchange_in_oi(change_in_oi, open_interest);
+            
             Some(ProcessedMcxOptionDetail {
                 strike_price: strike,
                 underlying_value,
-                open_interest: opt.pe_open_interest.map(|x| x as f64),
+                open_interest,
                 volume: opt.pe_volume.map(|x| x as f64),
                 last_price: opt.pe_ltp,
                 bid_price: opt.pe_bid_price,
                 ask_price: opt.pe_ask_price,
                 change: opt.pe_absolute_change,
                 change_percent: opt.pe_net_change,
-                change_in_oi: opt.pe_change_in_oi.map(|x| x as f64),
+                change_in_oi,
+                pchange_in_oi,
                 the_money: classify_money_with_distance(strike, atm_strike, &available_strikes, false),
-                tambu: calculate_tambu(
-                    opt.pe_change_in_oi.map(|x| x as f64),
-                    opt.pe_open_interest.map(|x| x as f64),
-                    opt.pe_net_change
-                ),
+                tambu: calculate_tambu(pchange_in_oi, opt.pe_net_change),
                 time_val: calculate_time_value(opt.pe_ltp, strike, underlying_value, false),
                 days_to_expiry,
                 oi_rank: None, // Will be calculated separately if needed
@@ -307,26 +314,30 @@ pub fn classify_money_with_distance(
     }
 }
 
-/// Calculate Tambu classification for MCX
-pub fn calculate_tambu(change_in_oi: Option<f64>, open_interest: Option<f64>, pchange: Option<f64>) -> Option<String> {
+/// Calculate percentage change in Open Interest
+pub fn calculate_pchange_in_oi(change_in_oi: Option<f64>, open_interest: Option<f64>) -> Option<f64> {
     let change_in_oi_val = change_in_oi.unwrap_or(0.0);
     let open_interest_val = open_interest.unwrap_or(0.0);
+    
+    if open_interest_val + change_in_oi_val != 0.0 {
+        Some((change_in_oi_val / (open_interest_val + change_in_oi_val)) * 100.0)
+    } else {
+        Some(0.0)
+    }
+}
+
+/// Calculate Tambu classification for MCX
+pub fn calculate_tambu(pchange_in_oi: Option<f64>,  pchange: Option<f64>) -> Option<String> {
+    let pchange_in_oi_val = pchange_in_oi.unwrap_or(0.0);
     let pchange_val = pchange.unwrap_or(0.0);
     
-    // Calculate pchange_in_oi = (change_in_oi / (open_interest + change_in_oi)) * 100
-    let pchange_in_oi = if open_interest_val + change_in_oi_val != 0.0 {
-        (change_in_oi_val / (open_interest_val + change_in_oi_val)) * 100.0
-    } else {
-        0.0
-    };
-    
     // TMJ: pchange_in_oi > 30% AND pchange < -15%
-    if pchange_in_oi > 30.0 && pchange_val < -15.0 {
+    if pchange_in_oi_val > 30.0 && pchange_val < -15.0 {
         return Some("TMJ".to_string());
     }
     
     // TMG: pchange_in_oi < -10% AND pchange > 15%
-    if pchange_in_oi < -10.0 && pchange_val > 15.0 {
+    if pchange_in_oi_val < -10.0 && pchange_val > 15.0 {
         return Some("TMG".to_string());
     }
     
