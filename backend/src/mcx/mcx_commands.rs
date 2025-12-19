@@ -10,10 +10,10 @@ use std::sync::Arc;
 pub struct MCXCommands;
 
 impl MCXCommands {
-    /// Run batch fetch for all MCX tickers
+    /// Run batch fetch for all MCX tickers (nearest future expiry per symbol only)
     pub async fn run_batch() -> Result<()> {
         println!("{}", "=".repeat(60).blue());
-        println!("{}", "MCX Batch Processor".green().bold());
+        println!("{}", "MCX Batch Processor (Nearest Future Expiry Only)".green().bold());
         println!("{}", "=".repeat(60).blue());
         println!();
 
@@ -21,16 +21,27 @@ impl MCXCommands {
 
         // Step 1: Fetch all MCX tickers from web scraping
         println!("{}", "Step 1: Scraping MCX tickers from option chain page...".cyan());
-        let tickers = client.fetch_ticker_list().await?;
-        println!("{} Found {} tickers", "✓".green(), tickers.len());
+        let all_tickers = client.fetch_ticker_list().await?;
+        println!("{} Found {} total tickers", "✓".green(), all_tickers.len());
         
-        let unique_symbols = MCXClient::get_unique_symbols(&tickers);
+        let unique_symbols = MCXClient::get_unique_symbols(&all_tickers);
         println!("{} Unique symbols: {}", "ℹ".blue(), unique_symbols.len());
         println!("{} Symbols: {}", "ℹ".blue(), unique_symbols.join(", ").yellow());
         println!();
 
-        // Step 2: Bulk process all tickers with timeout handling
-        println!("{}", "Step 2: Processing all tickers...".cyan());
+        // Step 1.5: Filter to only nearest future expiry per symbol
+        println!("{}", "Step 1.5: Filtering to nearest future expiry per symbol...".cyan());
+        let tickers = MCXClient::filter_latest_expiry_per_symbol(all_tickers.clone());
+        let reduction_percent = ((all_tickers.len() - tickers.len()) as f64 / all_tickers.len() as f64) * 100.0;
+        
+        println!("{} Filtered to {} tickers (nearest future expiry only)", "✓".green(), tickers.len());
+        println!("{} Reduction: {:.1}% fewer API calls", "📉".yellow(), reduction_percent);
+        println!("{} Processing {} symbols instead of {} total combinations", 
+                 "ℹ".blue(), tickers.len(), all_tickers.len());
+        println!();
+
+        // Step 2: Bulk process filtered tickers with timeout handling
+        println!("{}", "Step 2: Processing nearest future expiry tickers only...".cyan());
         
         let max_concurrent = if config::is_ci_environment() {
             println!("{} CI Mode: Using lower concurrency ({})", "ℹ".blue(), config::CI_MAX_CONCURRENT);
@@ -96,10 +107,10 @@ impl MCXCommands {
         println!("\n");
 
         // Step 4: Display summary
-        Self::display_batch_summary(&successful, &failed, timeout_count, elapsed, &tickers);
+        Self::display_batch_summary(&successful, &failed, timeout_count, elapsed, &tickers, &all_tickers);
 
-        // Step 5: Save results to JSON files
-        Self::save_batch_results(&tickers, successful).await?;
+        // Step 5: Save results to JSON files (save both original and filtered lists)
+        Self::save_batch_results(&all_tickers, &tickers, successful).await?;
 
         println!();
         println!("{}", "=".repeat(60).blue());
@@ -142,19 +153,29 @@ impl MCXCommands {
         mcx_api_server::start_mcx_server(port).await
     }
 
-    /// Display batch processing summary
+    /// Display batch processing summary with filtering information
     fn display_batch_summary(
         successful: &[(super::models::Ticker, super::models::OptionChainResponse)],
         failed: &[(String, String)],
         timeout_count: i32,
         elapsed: std::time::Duration,
-        tickers: &[super::models::Ticker],
+        filtered_tickers: &[super::models::Ticker],
+        all_tickers: &[super::models::Ticker],
     ) {
         println!("{}", "=".repeat(60).blue());
         println!("{}", "Summary".cyan().bold());
         println!("{}", "=".repeat(60).blue());
-        println!("{} Successful: {}", "✓".green(), successful.len());
-        println!("{} Failed: {}", "✗".red(), failed.len());
+        
+        // Filtering summary
+        println!("{} Total tickers available: {}", "📊".blue(), all_tickers.len());
+        println!("{} Nearest future expiry filtered: {}", "🔍".blue(), filtered_tickers.len());
+        let reduction_percent = ((all_tickers.len() - filtered_tickers.len()) as f64 / all_tickers.len() as f64) * 100.0;
+        println!("{} API call reduction: {:.1}%", "📉".green(), reduction_percent);
+        println!();
+        
+        // Processing summary
+        println!("{} Successful: {}/{}", "✓".green(), successful.len(), filtered_tickers.len());
+        println!("{} Failed: {}/{}", "✗".red(), failed.len(), filtered_tickers.len());
         
         if timeout_count > 0 {
             println!("{} Timed out: {} (due to {} second limit)", "⏱".yellow(), timeout_count, config::GITHUB_ACTIONS_TIMEOUT_SECS);
@@ -162,8 +183,8 @@ impl MCXCommands {
         
         println!("{} Time taken: {:.2}s", "⏱".yellow(), elapsed.as_secs_f64());
         
-        if tickers.len() > 0 {
-            println!("{} Avg time per ticker: {:.2}s", "⏱".yellow(), elapsed.as_secs_f64() / tickers.len() as f64);
+        if filtered_tickers.len() > 0 {
+            println!("{} Avg time per ticker: {:.2}s", "⏱".yellow(), elapsed.as_secs_f64() / filtered_tickers.len() as f64);
         }
         
         println!();
@@ -202,27 +223,36 @@ impl MCXCommands {
         println!();
     }
 
-    /// Save batch results to JSON files
+    /// Save batch results to JSON files (with both original and filtered ticker lists)
     async fn save_batch_results(
-        tickers: &[super::models::Ticker],
+        all_tickers: &[super::models::Ticker],
+        filtered_tickers: &[super::models::Ticker],
         successful: Vec<(super::models::Ticker, super::models::OptionChainResponse)>,
     ) -> Result<()> {
         println!("{}", "Saving results to JSON files...".cyan());
         
-        // Save ticker list
-        std::fs::write(
-            "mcx_tickers.json",
-            serde_json::to_string_pretty(&tickers)?,
-        )?;
-        println!("{} Saved tickers to mcx_tickers.json", "✓".green());
+        // // // Save all tickers list (for reference)
+        // std::fs::write(
+        //     "mcx_all_tickers.json",
+        //     serde_json::to_string_pretty(&all_tickers)?,
+        // )?;
+        // println!("{} Saved all tickers to mcx_all_tickers.json", "✓".green());
         
-        // Save successful option chains
+        // // // Save filtered tickers list (what was actually processed)
+        // std::fs::write(
+        //     "mcx_filtered_tickers.json",
+        //     serde_json::to_string_pretty(&filtered_tickers)?,
+        // )?;
+        // println!("{} Saved filtered tickers to mcx_filtered_tickers.json", "✓".green());
+        
+        // // Save successful option chains
         if !successful.is_empty() {
             let batch_data: Vec<serde_json::Value> = successful.iter().map(|(ticker, chain)| {
                 serde_json::json!({
                     "ticker": ticker,
                     "option_chain": chain,
                     "processed_at": chrono::Utc::now().to_rfc3339(),
+                    "note": "Nearest future expiry only"
                 })
             }).collect();
             
@@ -232,7 +262,7 @@ impl MCXCommands {
             )?;
             
             println!("{} Saved option chains to mcx_batch_results.json", "✓".green());
-            println!("{} Successfully processed: {}", "ℹ".blue(), successful.len());
+            println!("{} Successfully processed: {} nearest future expiry contracts", "ℹ".blue(), successful.len());
         } else {
             // Create empty file for consistency
             std::fs::write("mcx_batch_results.json", "[]")?;
@@ -248,7 +278,7 @@ impl MCXCommands {
         eprintln!("Set MCX_MODE environment variable to control execution mode");
         eprintln!("Examples:");
         eprintln!("  MCX_MODE=server MCX_PORT=3002 cargo run   # Start MCX API server on port 3002");
-        eprintln!("  MCX_MODE=batch cargo run                   # Run MCX batch analysis");
+        eprintln!("  MCX_MODE=batch cargo run                   # Run MCX batch analysis (nearest future expiry only)");
         eprintln!("Note: GitHub Actions supports 'batch' mode");
     }
 

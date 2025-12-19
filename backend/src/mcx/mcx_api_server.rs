@@ -55,6 +55,8 @@ pub struct BatchAnalysisResponse {
 #[derive(Debug, Serialize)]
 pub struct BatchSummary {
     pub total_tickers: usize,
+    pub total_unique_symbols: usize,
+    pub filtered_latest_expiry: usize,
     pub successful: usize,
     pub failed: usize,
     pub processing_time_ms: u64,
@@ -209,14 +211,14 @@ async fn get_option_chain(
     }
 }
 
-/// POST /api/mcx/batch-analysis - Run batch analysis for all MCX tickers
+/// POST /api/mcx/batch-analysis - Run batch analysis for latest expiry per symbol only
 async fn run_batch_analysis(
     State(app_state): State<AppState>,
 ) -> Result<Json<ApiResponse<BatchAnalysisResponse>>, StatusCode> {
     let start_time = Instant::now();
 
     // Step 1: Fetch all MCX tickers
-    let tickers = match app_state.client.fetch_ticker_list().await {
+    let all_tickers = match app_state.client.fetch_ticker_list().await {
         Ok(tickers) => tickers,
         Err(e) => {
             return Ok(Json(ApiResponse {
@@ -228,22 +230,38 @@ async fn run_batch_analysis(
         }
     };
 
-    let total_tickers = tickers.len();
+    let total_tickers = all_tickers.len();
+    let unique_symbols = MCXClient::get_unique_symbols(&all_tickers);
+    let total_unique_symbols = unique_symbols.len();
+
+    // Step 2: Filter to only latest expiry per symbol
+    let filtered_tickers = MCXClient::filter_latest_expiry_per_symbol(all_tickers);
+    let filtered_count = filtered_tickers.len();
+
+    println!("📊 Batch Analysis Summary:");
+    println!("   Total tickers from MCX: {}", total_tickers);
+    println!("   Unique symbols: {}", total_unique_symbols);
+    println!("   Latest expiry filtered: {}", filtered_count);
+    println!("   Reduction: {:.1}%", 
+             (1.0 - (filtered_count as f64 / total_tickers as f64)) * 100.0);
+
     let max_concurrent = if config::is_ci_environment() {
         config::CI_MAX_CONCURRENT
     } else {
         config::DEFAULT_MAX_CONCURRENT
     };
 
-    // Step 2: Bulk process all tickers
-    let results = app_state.client.clone().fetch_all_option_chains(tickers.clone(), max_concurrent).await;
+    // Step 3: Bulk process filtered tickers (only latest expiry per symbol)
+    let results = app_state.client.clone()
+        .fetch_all_option_chains(filtered_tickers.clone(), max_concurrent)
+        .await;
 
-    // Step 3: Process results
+    // Step 4: Process results
     let mut batch_results = Vec::new();
     let mut successful_count = 0;
     let mut failed_count = 0;
 
-    for (ticker, result) in tickers.iter().zip(results.iter()) {
+    for (ticker, result) in filtered_tickers.iter().zip(results.iter()) {
         match result {
             Ok((_, chain)) => {
                 successful_count += 1;
@@ -266,10 +284,17 @@ async fn run_batch_analysis(
 
     let summary = BatchSummary {
         total_tickers,
+        total_unique_symbols,
+        filtered_latest_expiry: filtered_count,
         successful: successful_count,
         failed: failed_count,
         processing_time_ms: start_time.elapsed().as_millis() as u64,
     };
+
+    println!("✅ Batch analysis completed:");
+    println!("   Successful: {}/{}", successful_count, filtered_count);
+    println!("   Failed: {}/{}", failed_count, filtered_count);
+    println!("   Processing time: {}ms", summary.processing_time_ms);
 
     Ok(Json(ApiResponse {
         success: true,
@@ -308,7 +333,7 @@ pub async fn start_mcx_server(port: u16) -> Result<()> {
     println!("   GET  /health");
     println!("   GET  /api/mcx/tickers");
     println!("   GET  /api/mcx/option-chain?commodity=COPPER&expiry=23DEC2025");
-    println!("   POST /api/mcx/batch-analysis");
+    println!("   POST /api/mcx/batch-analysis (Latest Expiry Only)");
     println!();
 
     axum::serve(listener, app).await?;

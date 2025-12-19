@@ -429,6 +429,112 @@ impl MCXClient {
         results
     }
 
+    /// Parse expiry date string to NaiveDate for comparison
+    /// Handles various formats like "23DEC2025", "23-DEC-2025", etc.
+    fn parse_expiry_date(expiry_str: &str) -> Result<NaiveDate> {
+        // Clean the string and try different formats
+        let cleaned = expiry_str.trim().to_uppercase().replace("-", "");
+        
+        // Try DD-MON-YYYY format (e.g., "23DEC2025")
+        if cleaned.len() == 9 {
+            if let Ok(date) = NaiveDate::parse_from_str(&cleaned, "%d%b%Y") {
+                return Ok(date);
+            }
+        }
+        
+        // Try DD-MM-YYYY format
+        if let Ok(date) = NaiveDate::parse_from_str(expiry_str, "%d-%m-%Y") {
+            return Ok(date);
+        }
+        
+        // Try YYYY-MM-DD format
+        if let Ok(date) = NaiveDate::parse_from_str(expiry_str, "%Y-%m-%d") {
+            return Ok(date);
+        }
+        
+        Err(anyhow!("Unable to parse expiry date: {}", expiry_str))
+    }
+
+    /// Filter tickers to only include the nearest future expiry per symbol
+    /// Process: 1) Sort chronologically, 2) Remove past expiries, 3) Select first (youngest) future expiry
+    pub fn filter_latest_expiry_per_symbol(tickers: Vec<Ticker>) -> Vec<Ticker> {
+        use std::collections::HashMap;
+        use chrono::Utc;
+        
+        let today = Utc::now().date_naive();
+        let mut symbol_tickers: HashMap<String, Vec<Ticker>> = HashMap::new();
+        
+        // Group tickers by symbol
+        for ticker in tickers {
+            symbol_tickers.entry(ticker.symbol.clone()).or_insert_with(Vec::new).push(ticker);
+        }
+        
+        let mut result = Vec::new();
+        let mut total_removed_past = 0;
+        
+        for (_symbol, mut tickers_for_symbol) in symbol_tickers {
+            // Calculate metrics before consuming the vector
+            let initial_count = tickers_for_symbol.len();
+            let past_count = tickers_for_symbol.iter()
+                .filter(|t| {
+                    if let Ok(date) = Self::parse_expiry_date(&t.expiry_date) {
+                        date < today
+                    } else {
+                        false
+                    }
+                })
+                .count();
+            
+            // Sort tickers by expiry date chronologically (earliest first)
+            tickers_for_symbol.sort_by(|a, b| {
+                match (Self::parse_expiry_date(&a.expiry_date), Self::parse_expiry_date(&b.expiry_date)) {
+                    (Ok(date_a), Ok(date_b)) => date_a.cmp(&date_b),
+                    (Ok(_), Err(_)) => std::cmp::Ordering::Less,  // Valid dates come first
+                    (Err(_), Ok(_)) => std::cmp::Ordering::Greater,
+                    (Err(_), Err(_)) => a.expiry_date.cmp(&b.expiry_date), // Fallback to string comparison
+                }
+            });
+            
+            // Filter out past expiries and find the first (youngest) future expiry
+            let mut found_future_expiry = false;
+            
+            for ticker in tickers_for_symbol {
+                if let Ok(expiry_date) = Self::parse_expiry_date(&ticker.expiry_date) {
+                    if expiry_date >= today && !found_future_expiry {
+                        // This is the nearest future expiry for this symbol
+                        result.push(ticker);
+                        found_future_expiry = true;
+                    } else if expiry_date < today {
+                        total_removed_past += 1;
+                    }
+                } else {
+                    // If we can't parse the date and no future expiry found yet, include it
+                    if !found_future_expiry {
+                        result.push(ticker);
+                        found_future_expiry = true;
+                    }
+                }
+            }
+            
+            // Log filtering details for this symbol (using metrics calculated earlier)
+            if initial_count > 1 {
+                if past_count > 0 || initial_count > 1 {
+                    println!(" {} expiries → 1 (removed {} past)", initial_count, past_count);
+                }
+            }
+        }
+        
+        // Sort final result by symbol name
+        result.sort_by(|a, b| a.symbol.cmp(&b.symbol));
+        
+        println!("🔍 Filtered to {} nearest future expiry tickers", result.len());
+        if total_removed_past > 0 {
+            println!("📅 Removed {} past expiries", total_removed_past);
+        }
+        
+        result
+    }
+
     /// Utility methods
     pub fn get_unique_symbols(tickers: &[Ticker]) -> Vec<String> {
         let mut symbols: Vec<String> = tickers
