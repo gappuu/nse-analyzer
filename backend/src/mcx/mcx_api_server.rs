@@ -32,6 +32,12 @@ pub struct OptionChainQuery {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct OptionQuoteQuery {
+    pub commodity: String,
+    pub expiry: String,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct HistoricDataQuery {
     pub symbol: String,
     pub expiry: String,
@@ -91,6 +97,7 @@ pub struct AppState {
 struct Cache {
     ticker_list: Option<(Vec<Ticker>, Instant)>,
     option_chains: HashMap<String, (OptionChainResponse, Instant)>,
+    option_quotes: HashMap<String, (serde_json::Value, Instant)>,
     future_symbols: Option<(serde_json::Value, Instant)>,
     historic_data: HashMap<String, (serde_json::Value, Instant)>,
 }
@@ -317,6 +324,57 @@ async fn run_batch_analysis(
     }))
 }
 
+/// GET /api/mcx/option-quote?commodity=ALUMINI&expiry=31DEC2025 - Get option quote for specific commodity and expiry
+async fn get_option_quote(
+    Query(query): Query<OptionQuoteQuery>,
+    State(app_state): State<AppState>,
+) -> Result<Json<ApiResponse<serde_json::Value>>, StatusCode> {
+    let start_time = Instant::now();
+    let cache_key = format!("quote_{}_{}", query.commodity, query.expiry);
+
+    // Check cache first
+    {
+        let cache = app_state.cache.read().await;
+        if let Some((quote_data, cached_at)) = cache.option_quotes.get(&cache_key) {
+            if cached_at.elapsed() < CACHE_DURATION {
+                return Ok(Json(ApiResponse {
+                    success: true,
+                    data: Some(quote_data.clone()),
+                    error: None,
+                    processing_time_ms: Some(start_time.elapsed().as_millis() as u64),
+                }));
+            }
+        }
+    }
+
+    // Fetch from MCX API
+    match app_state.client.fetch_option_quote(&query.commodity, &query.expiry).await {
+        Ok(quote_data) => {
+            // Update cache
+            {
+                let mut cache = app_state.cache.write().await;
+                cache.option_quotes.insert(
+                    cache_key,
+                    (quote_data.clone(), Instant::now()),
+                );
+            }
+
+            Ok(Json(ApiResponse {
+                success: true,
+                data: Some(quote_data),
+                error: None,
+                processing_time_ms: Some(start_time.elapsed().as_millis() as u64),
+            }))
+        }
+        Err(e) => Ok(Json(ApiResponse {
+            success: false,
+            data: None,
+            error: Some(e.to_string()),
+            processing_time_ms: Some(start_time.elapsed().as_millis() as u64),
+        })),
+    }
+}
+
 /// GET /api/mcx/future-symbols - Get available future symbols and expiry dates
 async fn get_future_symbols(State(app_state): State<AppState>) -> Result<Json<ApiResponse<serde_json::Value>>, StatusCode> {
     let start_time = Instant::now();
@@ -422,6 +480,7 @@ pub async fn start_mcx_server(port: u16) -> Result<()> {
     let mcx_routes = Router::new()
         .route("/api/mcx/tickers", get(get_ticker_list))
         .route("/api/mcx/option-chain", get(get_option_chain))
+        .route("/api/mcx/option-quote", get(get_option_quote))
         .route("/api/mcx/batch-analysis", post(run_batch_analysis))
         .route("/api/mcx/future-symbols", get(get_future_symbols))
         .route("/api/mcx/historic-data", get(get_historic_data));
@@ -440,6 +499,7 @@ pub async fn start_mcx_server(port: u16) -> Result<()> {
     println!("   GET  /health");
     println!("   GET  /api/mcx/tickers");
     println!("   GET  /api/mcx/option-chain?commodity=COPPER&expiry=23DEC2025");
+    println!("   GET  /api/mcx/option-quote?commodity=ALUMINI&expiry=31DEC2025");
     println!("   POST /api/mcx/batch-analysis (Latest Expiry Only)");
     println!("   GET  /api/mcx/future-symbols");
     println!("   GET  /api/mcx/historic-data?symbol=COPPER&expiry=23DEC2025&from_date=20251215&to_date=20251219");
@@ -454,6 +514,7 @@ pub fn get_mcx_routes() -> Router<AppState> {
     Router::new()
         .route("/api/mcx/tickers", get(get_ticker_list))
         .route("/api/mcx/option-chain", get(get_option_chain))
+        .route("/api/mcx/option-quote", get(get_option_quote))
         .route("/api/mcx/batch-analysis", post(run_batch_analysis))
         .route("/api/mcx/future-symbols", get(get_future_symbols))
         .route("/api/mcx/historic-data", get(get_historic_data))

@@ -431,6 +431,19 @@ impl MCXClient {
 
     /// Fetch available future symbols and expiry dates
     pub async fn fetch_future_symbols(&self) -> Result<serde_json::Value> {
+        // First try the direct API approach
+        match self.fetch_future_symbols_direct().await {
+            Ok(data) => return Ok(data),
+            Err(e) => {
+                println!("🔄 Direct API failed ({}), trying with session establishment...", e);
+                // Fallback to session-based approach
+                return self.fetch_future_symbols_with_session().await;
+            }
+        }
+    }
+
+    /// Direct API call approach
+    async fn fetch_future_symbols_direct(&self) -> Result<serde_json::Value> {
         let url = "https://www.mcxindia.com/api/ContractAvailableForTrading/StaggeredProductDetailsCurrent";
         
         let backoff = ExponentialBackoff::from_millis(config::RETRY_BASE_DELAY_MS)
@@ -484,15 +497,74 @@ impl MCXClient {
             }
         }).await;
         
-        match result {
-            Ok(data) => {
-                println!("✅ Successfully fetched future symbols data");
-                Ok(data)
+        result
+    }
+
+    /// Session-based approach - visit the website first to establish session
+    async fn fetch_future_symbols_with_session(&self) -> Result<serde_json::Value> {
+        // Step 1: Visit the main option chain page to establish session
+        println!("🔄 Establishing session by visiting option chain page...");
+        let _session_response = self.client
+            .get("https://www.mcxindia.com/market-data/option-chain")
+            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
+            .header("Accept-Encoding", "gzip, deflate, br")
+            .header("Accept-Language", "en-US,en;q=0.9")
+            .header("Sec-Ch-Ua", "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"")
+            .header("Sec-Ch-Ua-Mobile", "?0")
+            .header("Sec-Ch-Ua-Platform", "\"Windows\"")
+            .header("Sec-Fetch-Dest", "document")
+            .header("Sec-Fetch-Mode", "navigate")
+            .header("Sec-Fetch-Site", "none")
+            .header("Sec-Fetch-User", "?1")
+            .header("Upgrade-Insecure-Requests", "1")
+            .send()
+            .await?;
+
+        // Step 2: Now try the API call with established session
+        println!("🔄 Making API call with established session...");
+        let url = "https://www.mcxindia.com/api/ContractAvailableForTrading/StaggeredProductDetailsCurrent";
+        
+        let res = self.client
+            .get(url)
+            .header("Accept", "application/json, text/plain, */*")
+            .header("Accept-Encoding", "gzip, deflate, br")
+            .header("Accept-Language", "en-US,en;q=0.9")
+            .header("Cache-Control", "no-cache")
+            .header("Pragma", "no-cache")
+            .header("Referer", "https://www.mcxindia.com/market-data/option-chain")
+            .header("Sec-Ch-Ua", "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"")
+            .header("Sec-Ch-Ua-Mobile", "?0")
+            .header("Sec-Ch-Ua-Platform", "\"Windows\"")
+            .header("Sec-Fetch-Dest", "empty")
+            .header("Sec-Fetch-Mode", "cors")
+            .header("Sec-Fetch-Site", "same-origin")
+            .header("X-Requested-With", "XMLHttpRequest")
+            .query(&[
+                ("instrumentName", "FUTCOM"),
+                ("product", "ALL"),
+                ("productMonth", "ALL"),
+                ("OptionType", "ALL"),
+                ("StrikePrice", "ALL"),
+            ])
+            .send()
+            .await?;
+
+        let status = res.status();
+        if status.is_success() {
+            let text = res.text().await?;
+            if text.trim().is_empty() {
+                anyhow::bail!("Empty response from MCX future symbols API");
             }
-            Err(e) => {
-                println!("❌ Failed to fetch future symbols data: {}", e);
-                Err(e)
-            }
+            
+            let data: serde_json::Value = serde_json::from_str(&text)
+                .map_err(|e| anyhow::anyhow!("Failed to parse future symbols response: {}", e))?;
+            
+            println!("✅ Successfully fetched future symbols data with session");
+            Ok(data)
+        } else {
+            let body = res.text().await.unwrap_or_default();
+            let preview: String = body.chars().take(500).collect();
+            Err(anyhow!("Session-based request failed {}: {}", status, preview))
         }
     }
 
@@ -565,6 +637,71 @@ impl MCXClient {
             }
             Err(e) => {
                 println!("❌ Failed to fetch historic data for {} {}: {}", symbol, expiry, e);
+                Err(e)
+            }
+        }
+    }
+
+    /// Fetch option quote for specific commodity and expiry
+    pub async fn fetch_option_quote(
+        &self,
+        commodity: &str,
+        expiry: &str,
+    ) -> Result<serde_json::Value> {
+        let payload = serde_json::json!({
+            "Commodity": commodity,
+            "Expiry": expiry
+        });
+        
+        let backoff = ExponentialBackoff::from_millis(config::RETRY_BASE_DELAY_MS)
+            .factor(config::RETRY_FACTOR)
+            .max_delay(Duration::from_secs(config::RETRY_MAX_DELAY_SECS))
+            .take(config::RETRY_MAX_ATTEMPTS);
+
+        let result = Retry::spawn(backoff, || async {
+            let res = self.client
+                .post("https://www.mcxindia.com/BackPage.aspx/GetQuote")
+                .header("Accept", "application/json, text/javascript, */*; q=0.01")
+                .header("Accept-Encoding", "gzip, deflate, br")
+                .header("Accept-Language", "en-US,en;q=0.9")
+                .header("Content-Type", "application/json; charset=utf-8")
+                .header("Cache-Control", "no-cache")
+                .header("Pragma", "no-cache")
+                .header("Referer", "https://www.mcxindia.com/market-data/option-chain")
+                .header("Sec-Ch-Ua", "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"")
+                .header("Sec-Ch-Ua-Mobile", "?0")
+                .header("Sec-Ch-Ua-Platform", "\"Windows\"")
+                .header("Sec-Fetch-Dest", "empty")
+                .header("Sec-Fetch-Mode", "cors")
+                .header("Sec-Fetch-Site", "same-origin")
+                .header("X-Requested-With", "XMLHttpRequest")
+                .json(&payload)
+                .send()
+                .await?;
+
+            let status = res.status();
+            if status.is_success() {
+                let text = res.text().await?;
+                if text.trim().is_empty() || text.contains("error") {
+                    anyhow::bail!("Empty or error response from MCX option quote API");
+                }
+                
+                let data: serde_json::Value = serde_json::from_str(&text)
+                    .map_err(|e| anyhow::anyhow!("Failed to parse option quote response: {}", e))?;
+                
+                Ok(data)
+            } else {
+                anyhow::bail!("HTTP error: {}", status)
+            }
+        }).await;
+        
+        match result {
+            Ok(data) => {
+                println!("✅ Successfully fetched option quote for {} {}", commodity, expiry);
+                Ok(data)
+            }
+            Err(e) => {
+                println!("❌ Failed to fetch option quote for {} {}: {}", commodity, expiry, e);
                 Err(e)
             }
         }
