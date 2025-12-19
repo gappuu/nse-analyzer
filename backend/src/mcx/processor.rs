@@ -1,38 +1,90 @@
 use super::models::{ OptionData as McxOptionData};
 use serde::{Deserialize, Serialize};
-use chrono::{NaiveDate, Local};
+use chrono::{DateTime, Local, NaiveDate};
 use anyhow::{Result, anyhow};
+
+/// Convert MCX timestamp format "/Date(1766159098000)/" to readable format
+pub fn convert_mcx_timestamp(mcx_timestamp: &str) -> String {
+    // Extract epoch from "/Date(1766159098000)/" format
+    if let Some(start) = mcx_timestamp.find('(') {
+        if let Some(end) = mcx_timestamp.find(')') {
+            if let Ok(epoch_millis) = mcx_timestamp[start + 1..end].parse::<i64>() {
+                // Convert milliseconds to seconds for DateTime
+                let epoch_secs = epoch_millis / 1000;
+                let naive = DateTime::from_timestamp(epoch_secs, 0);
+                
+                if let Some(dt) = naive {
+                    // Convert to local timezone and format
+                    let local_dt = dt.with_timezone(&chrono::Local);
+                    return local_dt.format("%d-%b-%Y %H:%M:%S").to_string();
+                }
+            }
+        }
+    }
+    
+    // Fallback to current time if parsing fails
+    Local::now().format("%d-%b-%Y %H:%M:%S").to_string()
+}
+
+/// Convert MCX expiry format "23DEC2025" to "30-Dec-2025" format
+pub fn convert_mcx_expiry_format(mcx_expiry: &str) -> String {
+    if let Ok(date) = NaiveDate::parse_from_str(mcx_expiry, "%d%b%Y") {
+        date.format("%d-%b-%Y").to_string()
+    } else {
+        mcx_expiry.to_string() // Fallback to original if parsing fails
+    }
+}
 
 /// Enhanced MCX option detail with computed fields
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessedMcxOptionDetail {
+    #[serde(rename = "strikePrice")]
     pub strike_price: f64,
+    
+    #[serde(rename = "underlyingValue")]
     pub underlying_value: f64,
+    
+    #[serde(rename = "openInterest")]
     pub open_interest: Option<f64>,
-    pub volume: Option<f64>,
+    
+    #[serde(rename = "lastPrice")]
     pub last_price: Option<f64>,
-    pub bid_price: Option<f64>,
-    pub ask_price: Option<f64>,
+    
     pub change: Option<f64>,
-    pub change_percent: Option<f64>,
+    
+    pub pchange: Option<f64>,
+    
+    #[serde(rename = "changeinOpenInterest")]
     pub change_in_oi: Option<f64>,
-    pub pchange_in_oi: Option<f64>, // Calculated percentage change in OI
+    
+    #[serde(rename = "pchangeinOpenInterest")]
+    pub pchange_in_oi: Option<f64>,
     
     // Computed fields
     pub the_money: String,  // "ATM", "1 ITM", "2 OTM", etc.
     pub tambu: Option<String>,  // "TMJ", "TMG", or None
     pub time_val: f64,
     pub days_to_expiry: i32,
+    
+    #[serde(rename = "oiRank")]
     pub oi_rank: Option<u32>,
 }
 
 /// Processed MCX option data with enhanced CE and PE
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessedMcxOptionData {
+    #[serde(rename = "strikePrice")]
     pub strike_price: f64,
+    
+    #[serde(rename = "expiryDates")]
     pub expiry_date: Option<String>,
+    
+    #[serde(rename = "CE")]
     pub call: Option<ProcessedMcxOptionDetail>,
+    
+    #[serde(rename = "PE")]
     pub put: Option<ProcessedMcxOptionDetail>,
+    
     pub days_to_expiry: i32,
 }
 
@@ -41,7 +93,10 @@ pub struct ProcessedMcxOptionData {
 pub struct McxSingleAnalysisResponse {
     pub symbol: String,
     pub timestamp: String,
+    
+    #[serde(rename = "underlyingValue")]
     pub underlying_value: f64,
+    
     pub spread: f64,
     pub days_to_expiry: i32,
     pub ce_oi: f64,
@@ -123,12 +178,9 @@ pub fn process_mcx_option_data(
                 strike_price: strike,
                 underlying_value,
                 open_interest,
-                volume: opt.ce_volume.map(|x| x as f64),
                 last_price: opt.ce_ltp,
-                bid_price: opt.ce_bid_price,
-                ask_price: opt.ce_ask_price,
                 change: opt.ce_absolute_change,
-                change_percent: opt.ce_net_change,
+                pchange: opt.ce_net_change,
                 change_in_oi,
                 pchange_in_oi,
                 the_money: classify_money_with_distance(strike, atm_strike, &available_strikes, true),
@@ -152,12 +204,9 @@ pub fn process_mcx_option_data(
                 strike_price: strike,
                 underlying_value,
                 open_interest,
-                volume: opt.pe_volume.map(|x| x as f64),
                 last_price: opt.pe_ltp,
-                bid_price: opt.pe_bid_price,
-                ask_price: opt.pe_ask_price,
                 change: opt.pe_absolute_change,
-                change_percent: opt.pe_net_change,
+                pchange: opt.pe_net_change,
                 change_in_oi,
                 pchange_in_oi,
                 the_money: classify_money_with_distance(strike, atm_strike, &available_strikes, false),
@@ -173,7 +222,7 @@ pub fn process_mcx_option_data(
         if call_detail.is_some() || put_detail.is_some() {
             processed.push(ProcessedMcxOptionData {
                 strike_price: strike,
-                expiry_date: Some(expiry_date.to_string()),
+                expiry_date: Some(convert_mcx_expiry_format(expiry_date)),
                 call: call_detail,
                 put: put_detail,
                 days_to_expiry,
@@ -460,7 +509,7 @@ pub fn create_single_analysis_response(
 ) -> McxSingleAnalysisResponse {
     McxSingleAnalysisResponse {
         symbol,
-        timestamp,
+        timestamp: convert_mcx_timestamp(&timestamp),
         underlying_value,
         spread,
         days_to_expiry,
