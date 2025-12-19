@@ -1,4 +1,4 @@
-use super::config;
+use super::config::{*};
 use super::models::{Ticker, OptionChainResponse};
 use anyhow::{anyhow, Result};
 use chrono::{Datelike, NaiveDate, Utc, Weekday};
@@ -93,8 +93,8 @@ impl MCXClient {
     pub fn new() -> Result<Self> {
         let client = Client::builder()
             .cookie_store(true)
-            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
-            .timeout(Duration::from_secs(30))
+            .user_agent(USER_AGENT)
+            .timeout(HTTP_TIMEOUT)
             .redirect(reqwest::redirect::Policy::limited(10))
             .gzip(true)
             .build()?;
@@ -140,6 +140,7 @@ impl MCXClient {
         prev_date
     }
 
+
     /// Fetch bhav copy data with automatic date fallback
     async fn fetch_bhav_copy_with_fallback(&self) -> Result<BhavCopyResponse> {
         let mut data_date = Self::get_data_date();
@@ -153,31 +154,19 @@ impl MCXClient {
                 instrument_name: "OPTFUT".to_string(),
             };
 
-            let backoff = ExponentialBackoff::from_millis(config::RETRY_BASE_DELAY_MS)
-                .factor(config::RETRY_FACTOR)
-                .max_delay(Duration::from_secs(config::RETRY_MAX_DELAY_SECS))
-                .take(config::RETRY_MAX_ATTEMPTS);
+            let backoff = ExponentialBackoff::from_millis(RETRY_BASE_DELAY_MS)
+                .factor(RETRY_FACTOR)
+                .max_delay(Duration::from_secs(RETRY_MAX_DELAY_SECS))
+                .take(RETRY_MAX_ATTEMPTS);
 
             let result = Retry::spawn(backoff, || async {
-                let res = self.client
-                    .post("https://www.mcxindia.com/backpage.aspx/GetDateWiseBhavCopy")
-                    .header("Accept", "application/json, text/javascript, */*; q=0.01")
-                    .header("Accept-Encoding", "gzip, deflate, br")
-                    .header("Accept-Language", "en-US,en;q=0.9")
-                    .header("Content-Type", "application/json; charset=utf-8")
-                    .header("Cache-Control", "no-cache")
-                    .header("Pragma", "no-cache")
-                    .header("Referer", "https://www.mcxindia.com/market-data/bhavcopy")
-                    .header("Sec-Ch-Ua", "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"")
-                    .header("Sec-Ch-Ua-Mobile", "?0")
-                    .header("Sec-Ch-Ua-Platform", "\"Windows\"")
-                    .header("Sec-Fetch-Dest", "empty")
-                    .header("Sec-Fetch-Mode", "cors")
-                    .header("Sec-Fetch-Site", "same-origin")
-                    .header("X-Requested-With", "XMLHttpRequest")
-                    .json(&payload)
-                    .send()
-                    .await?;
+                let res = apply_standard_post_headers(
+                    self.client.post(MCX_BHAVCOPY_API),
+                    REFERER_BHAVCOPY
+                )
+                .json(&payload)
+                .send()
+                .await?;
 
                 let status = res.status();
                 if status.is_success() {
@@ -283,7 +272,7 @@ impl MCXClient {
         Ok(tickers)
     }
 
-    /// Fetch option chain data (unchanged from previous implementation)
+    /// Fetch option chain data
     pub async fn fetch_option_chain(
         &self,
         commodity: &str,
@@ -294,31 +283,19 @@ impl MCXClient {
             "Expiry": expiry
         });
         
-        let backoff = ExponentialBackoff::from_millis(config::RETRY_BASE_DELAY_MS)
-            .factor(config::RETRY_FACTOR)
-            .max_delay(Duration::from_secs(config::RETRY_MAX_DELAY_SECS))
-            .take(config::RETRY_MAX_ATTEMPTS);
+        let backoff = ExponentialBackoff::from_millis(RETRY_BASE_DELAY_MS)
+            .factor(RETRY_FACTOR)
+            .max_delay(Duration::from_secs(RETRY_MAX_DELAY_SECS))
+            .take(RETRY_MAX_ATTEMPTS);
 
         let result = Retry::spawn(backoff, || async {
-            let res = self.client
-                .post("https://www.mcxindia.com/backpage.aspx/GetOptionChain")
-                .header("Accept", "application/json, text/javascript, */*; q=0.01")
-                .header("Accept-Encoding", "gzip, deflate, br")
-                .header("Accept-Language", "en-US,en;q=0.9")
-                .header("Content-Type", "application/json; charset=utf-8")
-                .header("Cache-Control", "no-cache")
-                .header("Pragma", "no-cache")
-                .header("Referer", "https://www.mcxindia.com/market-data/option-chain")
-                .header("Sec-Ch-Ua", "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"")
-                .header("Sec-Ch-Ua-Mobile", "?0")
-                .header("Sec-Ch-Ua-Platform", "\"Windows\"")
-                .header("Sec-Fetch-Dest", "empty")
-                .header("Sec-Fetch-Mode", "cors")
-                .header("Sec-Fetch-Site", "same-origin")
-                .header("X-Requested-With", "XMLHttpRequest")
-                .json(&payload)
-                .send()
-                .await?;
+            let res = apply_standard_post_headers(
+                self.client.post(MCX_OPTION_CHAIN_API),
+                REFERER_OPTION_CHAIN
+            )
+            .json(&payload)
+            .send()
+            .await?;
 
             let status = res.status();
             if status.is_success() {
@@ -444,38 +421,19 @@ impl MCXClient {
 
     /// Direct API call approach
     async fn fetch_future_symbols_direct(&self) -> Result<serde_json::Value> {
-        let url = "https://www.mcxindia.com/api/ContractAvailableForTrading/StaggeredProductDetailsCurrent";
-        
-        let backoff = ExponentialBackoff::from_millis(config::RETRY_BASE_DELAY_MS)
-            .factor(config::RETRY_FACTOR)
-            .max_delay(Duration::from_secs(config::RETRY_MAX_DELAY_SECS))
-            .take(config::RETRY_MAX_ATTEMPTS);
+        let backoff = ExponentialBackoff::from_millis(RETRY_BASE_DELAY_MS)
+            .factor(RETRY_FACTOR)
+            .max_delay(Duration::from_secs(RETRY_MAX_DELAY_SECS))
+            .take(RETRY_MAX_ATTEMPTS);
 
         let result = Retry::spawn(backoff, || async {
-            let res = self.client
-                .get(url)
-                .header("Accept", "application/json, text/plain, */*")
-                .header("Accept-Encoding", "gzip, deflate, br")
-                .header("Accept-Language", "en-US,en;q=0.9")
-                .header("Cache-Control", "no-cache")
-                .header("Pragma", "no-cache")
-                .header("Referer", "https://www.mcxindia.com/market-data/option-chain")
-                .header("Sec-Ch-Ua", "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"")
-                .header("Sec-Ch-Ua-Mobile", "?0")
-                .header("Sec-Ch-Ua-Platform", "\"Windows\"")
-                .header("Sec-Fetch-Dest", "empty")
-                .header("Sec-Fetch-Mode", "cors")
-                .header("Sec-Fetch-Site", "same-origin")
-                .header("X-Requested-With", "XMLHttpRequest")
-                .query(&[
-                    ("instrumentName", "FUTCOM"),
-                    ("product", "ALL"),
-                    ("productMonth", "ALL"),
-                    ("OptionType", "ALL"),
-                    ("StrikePrice", "ALL"),
-                ])
-                .send()
-                .await?;
+            let res = apply_standard_get_headers(
+                self.client.get(MCX_FUTURE_SYMBOLS_API),
+                REFERER_OPTION_CHAIN
+            )
+            .query(FUTURE_SYMBOLS_QUERY_PARAMS)
+            .send()
+            .await?;
 
             let status = res.status();
             if status.is_success() {
@@ -504,50 +462,22 @@ impl MCXClient {
     async fn fetch_future_symbols_with_session(&self) -> Result<serde_json::Value> {
         // Step 1: Visit the main option chain page to establish session
         println!("🔄 Establishing session by visiting option chain page...");
-        let _session_response = self.client
-            .get("https://www.mcxindia.com/market-data/option-chain")
-            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
-            .header("Accept-Encoding", "gzip, deflate, br")
-            .header("Accept-Language", "en-US,en;q=0.9")
-            .header("Sec-Ch-Ua", "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"")
-            .header("Sec-Ch-Ua-Mobile", "?0")
-            .header("Sec-Ch-Ua-Platform", "\"Windows\"")
-            .header("Sec-Fetch-Dest", "document")
-            .header("Sec-Fetch-Mode", "navigate")
-            .header("Sec-Fetch-Site", "none")
-            .header("Sec-Fetch-User", "?1")
-            .header("Upgrade-Insecure-Requests", "1")
-            .send()
-            .await?;
+        let _session_response = apply_session_headers(
+            self.client.get(MCX_OPTION_CHAIN_PAGE)
+        )
+        .send()
+        .await?;
 
         // Step 2: Now try the API call with established session
         println!("🔄 Making API call with established session...");
-        let url = "https://www.mcxindia.com/api/ContractAvailableForTrading/StaggeredProductDetailsCurrent";
         
-        let res = self.client
-            .get(url)
-            .header("Accept", "application/json, text/plain, */*")
-            .header("Accept-Encoding", "gzip, deflate, br")
-            .header("Accept-Language", "en-US,en;q=0.9")
-            .header("Cache-Control", "no-cache")
-            .header("Pragma", "no-cache")
-            .header("Referer", "https://www.mcxindia.com/market-data/option-chain")
-            .header("Sec-Ch-Ua", "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"")
-            .header("Sec-Ch-Ua-Mobile", "?0")
-            .header("Sec-Ch-Ua-Platform", "\"Windows\"")
-            .header("Sec-Fetch-Dest", "empty")
-            .header("Sec-Fetch-Mode", "cors")
-            .header("Sec-Fetch-Site", "same-origin")
-            .header("X-Requested-With", "XMLHttpRequest")
-            .query(&[
-                ("instrumentName", "FUTCOM"),
-                ("product", "ALL"),
-                ("productMonth", "ALL"),
-                ("OptionType", "ALL"),
-                ("StrikePrice", "ALL"),
-            ])
-            .send()
-            .await?;
+        let res = apply_standard_get_headers(
+            self.client.get(MCX_FUTURE_SYMBOLS_API),
+            REFERER_OPTION_CHAIN
+        )
+        .query(FUTURE_SYMBOLS_QUERY_PARAMS)
+        .send()
+        .await?;
 
         let status = res.status();
         if status.is_success() {
@@ -584,31 +514,19 @@ impl MCXClient {
             "InstrumentName": "OPTFUT"
         });
         
-        let backoff = ExponentialBackoff::from_millis(config::RETRY_BASE_DELAY_MS)
-            .factor(config::RETRY_FACTOR)
-            .max_delay(Duration::from_secs(config::RETRY_MAX_DELAY_SECS))
-            .take(config::RETRY_MAX_ATTEMPTS);
+        let backoff = ExponentialBackoff::from_millis(RETRY_BASE_DELAY_MS)
+            .factor(RETRY_FACTOR)
+            .max_delay(Duration::from_secs(RETRY_MAX_DELAY_SECS))
+            .take(RETRY_MAX_ATTEMPTS);
 
         let result = Retry::spawn(backoff, || async {
-            let res = self.client
-                .post("https://www.mcxindia.com/backpage.aspx/GetCommoditywiseBhavCopy")
-                .header("Accept", "application/json, text/javascript, */*; q=0.01")
-                .header("Accept-Encoding", "gzip, deflate, br")
-                .header("Accept-Language", "en-US,en;q=0.9")
-                .header("Content-Type", "application/json; charset=utf-8")
-                .header("Cache-Control", "no-cache")
-                .header("Pragma", "no-cache")
-                .header("Referer", "https://www.mcxindia.com/market-data/bhavcopy")
-                .header("Sec-Ch-Ua", "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"")
-                .header("Sec-Ch-Ua-Mobile", "?0")
-                .header("Sec-Ch-Ua-Platform", "\"Windows\"")
-                .header("Sec-Fetch-Dest", "empty")
-                .header("Sec-Fetch-Mode", "cors")
-                .header("Sec-Fetch-Site", "same-origin")
-                .header("X-Requested-With", "XMLHttpRequest")
-                .json(&payload)
-                .send()
-                .await?;
+            let res = apply_standard_post_headers(
+                self.client.post(MCX_HISTORIC_DATA_API),
+                REFERER_BHAVCOPY
+            )
+            .json(&payload)
+            .send()
+            .await?;
 
             let status = res.status();
             if status.is_success() {
@@ -653,41 +571,29 @@ impl MCXClient {
             "Expiry": expiry
         });
         
-        let backoff = ExponentialBackoff::from_millis(config::RETRY_BASE_DELAY_MS)
-            .factor(config::RETRY_FACTOR)
-            .max_delay(Duration::from_secs(config::RETRY_MAX_DELAY_SECS))
-            .take(config::RETRY_MAX_ATTEMPTS);
+        let backoff = ExponentialBackoff::from_millis(RETRY_BASE_DELAY_MS)
+            .factor(RETRY_FACTOR)
+            .max_delay(Duration::from_secs(RETRY_MAX_DELAY_SECS))
+            .take(RETRY_MAX_ATTEMPTS);
 
         let result = Retry::spawn(backoff, || async {
-            let res = self.client
-                .post("https://www.mcxindia.com/BackPage.aspx/GetQuote")
-                .header("Accept", "application/json, text/javascript, */*; q=0.01")
-                .header("Accept-Encoding", "gzip, deflate, br")
-                .header("Accept-Language", "en-US,en;q=0.9")
-                .header("Content-Type", "application/json; charset=utf-8")
-                .header("Cache-Control", "no-cache")
-                .header("Pragma", "no-cache")
-                .header("Referer", "https://www.mcxindia.com/market-data/option-chain")
-                .header("Sec-Ch-Ua", "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"")
-                .header("Sec-Ch-Ua-Mobile", "?0")
-                .header("Sec-Ch-Ua-Platform", "\"Windows\"")
-                .header("Sec-Fetch-Dest", "empty")
-                .header("Sec-Fetch-Mode", "cors")
-                .header("Sec-Fetch-Site", "same-origin")
-                .header("X-Requested-With", "XMLHttpRequest")
-                .json(&payload)
-                .send()
-                .await?;
+            let res = apply_standard_post_headers(
+                self.client.post(MCX_FUTURE_QUOTE_API),
+                REFERER_OPTION_CHAIN
+            )
+            .json(&payload)
+            .send()
+            .await?;
 
             let status = res.status();
             if status.is_success() {
                 let text = res.text().await?;
                 if text.trim().is_empty() || text.contains("error") {
-                    anyhow::bail!("Empty or error response from MCX option quote API");
+                    anyhow::bail!("Empty or error response from MCX future quote API");
                 }
                 
                 let data: serde_json::Value = serde_json::from_str(&text)
-                    .map_err(|e| anyhow::anyhow!("Failed to parse option quote response: {}", e))?;
+                    .map_err(|e| anyhow::anyhow!("Failed to parse future quote response: {}", e))?;
                 
                 Ok(data)
             } else {
@@ -707,7 +613,7 @@ impl MCXClient {
         }
     }
 
-    /// NEW: Fetch option quote for specific commodity, expiry, option type, and strike price
+    /// Fetch option quote for specific commodity, expiry, option type, and strike price
     pub async fn fetch_option_quote(
         &self,
         commodity: &str,
@@ -722,31 +628,19 @@ impl MCXClient {
             "StrikPrice": strike_price
         });
         
-        let backoff = ExponentialBackoff::from_millis(config::RETRY_BASE_DELAY_MS)
-            .factor(config::RETRY_FACTOR)
-            .max_delay(Duration::from_secs(config::RETRY_MAX_DELAY_SECS))
-            .take(config::RETRY_MAX_ATTEMPTS);
+        let backoff = ExponentialBackoff::from_millis(RETRY_BASE_DELAY_MS)
+            .factor(RETRY_FACTOR)
+            .max_delay(Duration::from_secs(RETRY_MAX_DELAY_SECS))
+            .take(RETRY_MAX_ATTEMPTS);
 
         let result = Retry::spawn(backoff, || async {
-            let res = self.client
-                .post("https://www.mcxindia.com/BackPage.aspx/GetQuoteOption")
-                .header("Accept", "application/json, text/javascript, */*; q=0.01")
-                .header("Accept-Encoding", "gzip, deflate, br")
-                .header("Accept-Language", "en-US,en;q=0.9")
-                .header("Content-Type", "application/json; charset=utf-8")
-                .header("Cache-Control", "no-cache")
-                .header("Pragma", "no-cache")
-                .header("Referer", "https://www.mcxindia.com/market-data/option-chain")
-                .header("Sec-Ch-Ua", "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"")
-                .header("Sec-Ch-Ua-Mobile", "?0")
-                .header("Sec-Ch-Ua-Platform", "\"Windows\"")
-                .header("Sec-Fetch-Dest", "empty")
-                .header("Sec-Fetch-Mode", "cors")
-                .header("Sec-Fetch-Site", "same-origin")
-                .header("X-Requested-With", "XMLHttpRequest")
-                .json(&payload)
-                .send()
-                .await?;
+            let res = apply_standard_post_headers(
+                self.client.post(MCX_OPTION_QUOTE_API),
+                REFERER_OPTION_CHAIN
+            )
+            .json(&payload)
+            .send()
+            .await?;
 
             let status = res.status();
             if status.is_success() {
