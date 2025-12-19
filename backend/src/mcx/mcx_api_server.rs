@@ -38,6 +38,14 @@ pub struct OptionQuoteQuery {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct SpecificOptionQuoteQuery {
+    pub commodity: String,
+    pub expiry: String,
+    pub option_type: String,  // CE or PE
+    pub strike_price: String, // e.g., "1120.00"
+}
+
+#[derive(Debug, Deserialize)]
 pub struct HistoricDataQuery {
     pub symbol: String,
     pub expiry: String,
@@ -98,6 +106,7 @@ struct Cache {
     ticker_list: Option<(Vec<Ticker>, Instant)>,
     option_chains: HashMap<String, (OptionChainResponse, Instant)>,
     future_quotes: HashMap<String, (serde_json::Value, Instant)>,
+    option_quotes: HashMap<String, (serde_json::Value, Instant)>,
     future_symbols: Option<(serde_json::Value, Instant)>,
     historic_data: HashMap<String, (serde_json::Value, Instant)>,
 }
@@ -324,7 +333,7 @@ async fn run_batch_analysis(
     }))
 }
 
-/// GET /api/mcx/future-quote?commodity=ALUMINI&expiry=31DEC2025 - Get option quote for specific commodity and expiry
+/// GET /api/mcx/future-quote?commodity=ALUMINI&expiry=31DEC2025 - Get future quote for specific commodity and expiry
 async fn get_future_quote(
     Query(query): Query<OptionQuoteQuery>,
     State(app_state): State<AppState>,
@@ -354,6 +363,63 @@ async fn get_future_quote(
             {
                 let mut cache = app_state.cache.write().await;
                 cache.future_quotes.insert(
+                    cache_key,
+                    (quote_data.clone(), Instant::now()),
+                );
+            }
+
+            Ok(Json(ApiResponse {
+                success: true,
+                data: Some(quote_data),
+                error: None,
+                processing_time_ms: Some(start_time.elapsed().as_millis() as u64),
+            }))
+        }
+        Err(e) => Ok(Json(ApiResponse {
+            success: false,
+            data: None,
+            error: Some(e.to_string()),
+            processing_time_ms: Some(start_time.elapsed().as_millis() as u64),
+        })),
+    }
+}
+
+/// GET /api/mcx/option-quote?commodity=COPPER&expiry=23DEC2025&option_type=CE&strike_price=1120.00 - Get specific option quote
+async fn get_option_quote(
+    Query(query): Query<SpecificOptionQuoteQuery>,
+    State(app_state): State<AppState>,
+) -> Result<Json<ApiResponse<serde_json::Value>>, StatusCode> {
+    let start_time = Instant::now();
+    let cache_key = format!("option_{}_{}_{}_{}",
+        query.commodity, query.expiry, query.option_type, query.strike_price);
+
+    // Check cache first
+    {
+        let cache = app_state.cache.read().await;
+        if let Some((quote_data, cached_at)) = cache.option_quotes.get(&cache_key) {
+            if cached_at.elapsed() < CACHE_DURATION {
+                return Ok(Json(ApiResponse {
+                    success: true,
+                    data: Some(quote_data.clone()),
+                    error: None,
+                    processing_time_ms: Some(start_time.elapsed().as_millis() as u64),
+                }));
+            }
+        }
+    }
+
+    // Fetch from MCX API
+    match app_state.client.fetch_option_quote(
+        &query.commodity,
+        &query.expiry,
+        &query.option_type,
+        &query.strike_price,
+    ).await {
+        Ok(quote_data) => {
+            // Update cache
+            {
+                let mut cache = app_state.cache.write().await;
+                cache.option_quotes.insert(
                     cache_key,
                     (quote_data.clone(), Instant::now()),
                 );
@@ -481,6 +547,7 @@ pub async fn start_mcx_server(port: u16) -> Result<()> {
         .route("/api/mcx/tickers", get(get_ticker_list))
         .route("/api/mcx/option-chain", get(get_option_chain))
         .route("/api/mcx/future-quote", get(get_future_quote))
+        .route("/api/mcx/option-quote", get(get_option_quote))
         .route("/api/mcx/batch-analysis", post(run_batch_analysis))
         .route("/api/mcx/future-symbols", get(get_future_symbols))
         .route("/api/mcx/historic-data", get(get_historic_data));
@@ -500,6 +567,7 @@ pub async fn start_mcx_server(port: u16) -> Result<()> {
     println!("   GET  /api/mcx/tickers");
     println!("   GET  /api/mcx/option-chain?commodity=COPPER&expiry=23DEC2025");
     println!("   GET  /api/mcx/future-quote?commodity=ALUMINI&expiry=31DEC2025");
+    println!("   GET  /api/mcx/option-quote?commodity=COPPER&expiry=23DEC2025&option_type=CE&strike_price=1120.00");
     println!("   POST /api/mcx/batch-analysis (Latest Expiry Only)");
     println!("   GET  /api/mcx/future-symbols");
     println!("   GET  /api/mcx/historic-data?symbol=COPPER&expiry=23DEC2025&from_date=20251215&to_date=20251219");
@@ -515,6 +583,7 @@ pub fn get_mcx_routes() -> Router<AppState> {
         .route("/api/mcx/tickers", get(get_ticker_list))
         .route("/api/mcx/option-chain", get(get_option_chain))
         .route("/api/mcx/future-quote", get(get_future_quote))
+        .route("/api/mcx/option-quote", get(get_option_quote))
         .route("/api/mcx/batch-analysis", post(run_batch_analysis))
         .route("/api/mcx/future-symbols", get(get_future_symbols))
         .route("/api/mcx/historic-data", get(get_historic_data))

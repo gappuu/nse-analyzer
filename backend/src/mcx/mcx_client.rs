@@ -642,7 +642,7 @@ impl MCXClient {
         }
     }
 
-    /// Fetch futures quote for specific commodity and expiry
+    /// Fetch futures quote for specific commodity and expiry (existing method)
     pub async fn fetch_future_quote(
         &self,
         commodity: &str,
@@ -697,11 +697,86 @@ impl MCXClient {
         
         match result {
             Ok(data) => {
-                println!("✅ Successfully fetched option quote for {} {}", commodity, expiry);
+                println!("✅ Successfully fetched future quote for {} {}", commodity, expiry);
                 Ok(data)
             }
             Err(e) => {
-                println!("❌ Failed to fetch option quote for {} {}: {}", commodity, expiry, e);
+                println!("❌ Failed to fetch future quote for {} {}: {}", commodity, expiry, e);
+                Err(e)
+            }
+        }
+    }
+
+    /// NEW: Fetch option quote for specific commodity, expiry, option type, and strike price
+    pub async fn fetch_option_quote(
+        &self,
+        commodity: &str,
+        expiry: &str,
+        option_type: &str,
+        strike_price: &str,
+    ) -> Result<serde_json::Value> {
+        let payload = serde_json::json!({
+            "Commodity": commodity,
+            "Expiry": expiry,
+            "OptionType": option_type,
+            "StrikPrice": strike_price
+        });
+        
+        let backoff = ExponentialBackoff::from_millis(config::RETRY_BASE_DELAY_MS)
+            .factor(config::RETRY_FACTOR)
+            .max_delay(Duration::from_secs(config::RETRY_MAX_DELAY_SECS))
+            .take(config::RETRY_MAX_ATTEMPTS);
+
+        let result = Retry::spawn(backoff, || async {
+            let res = self.client
+                .post("https://www.mcxindia.com/BackPage.aspx/GetQuoteOption")
+                .header("Accept", "application/json, text/javascript, */*; q=0.01")
+                .header("Accept-Encoding", "gzip, deflate, br")
+                .header("Accept-Language", "en-US,en;q=0.9")
+                .header("Content-Type", "application/json; charset=utf-8")
+                .header("Cache-Control", "no-cache")
+                .header("Pragma", "no-cache")
+                .header("Referer", "https://www.mcxindia.com/market-data/option-chain")
+                .header("Sec-Ch-Ua", "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"")
+                .header("Sec-Ch-Ua-Mobile", "?0")
+                .header("Sec-Ch-Ua-Platform", "\"Windows\"")
+                .header("Sec-Fetch-Dest", "empty")
+                .header("Sec-Fetch-Mode", "cors")
+                .header("Sec-Fetch-Site", "same-origin")
+                .header("X-Requested-With", "XMLHttpRequest")
+                .json(&payload)
+                .send()
+                .await?;
+
+            let status = res.status();
+            if status.is_success() {
+                let text = res.text().await?;
+                if text.trim().is_empty() || text.contains("error") {
+                    anyhow::bail!("Empty or error response from MCX option quote API");
+                }
+                
+                let data: serde_json::Value = serde_json::from_str(&text)
+                    .map_err(|e| anyhow::anyhow!("Failed to parse option quote response: {}", e))?;
+                
+                Ok(data)
+            } else if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+                anyhow::bail!("Retryable error: {}", status)
+            } else {
+                let body = res.text().await.unwrap_or_default();
+                let preview: String = body.chars().take(200).collect();
+                anyhow::bail!("Client error {}: {}", status, preview)
+            }
+        }).await;
+        
+        match result {
+            Ok(data) => {
+                println!("✅ Successfully fetched option quote for {} {} {} {}", 
+                         commodity, expiry, option_type, strike_price);
+                Ok(data)
+            }
+            Err(e) => {
+                println!("❌ Failed to fetch option quote for {} {} {} {}: {}", 
+                         commodity, expiry, option_type, strike_price, e);
                 Err(e)
             }
         }
