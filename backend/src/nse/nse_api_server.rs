@@ -140,7 +140,7 @@ impl AppState {
 
 /// GET /nse_health - Health check endpoint
 async fn health() -> &'static str {
-    "OK"
+    "NSE server -> OK"
 }
 
 /// GET /api/nse/securities - Get all FNO securities list

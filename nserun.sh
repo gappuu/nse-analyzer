@@ -7,11 +7,14 @@ set -euo pipefail
 # ==============================
 BACKEND_DIR="$HOME/Desktop/nse-analyzer/backend"
 FRONTEND_DIR="$HOME/Desktop/nse-analyzer/frontend"
-BACKEND_PORT=3001
-FRONTEND_PORT=3000
-LOG_DIR="$HOME/Desktop/nse-analyzer/logs"
 
+NSE_BACKEND_PORT=3001
+MCX_BACKEND_PORT=3002
+FRONTEND_PORT=3000
+
+LOG_DIR="$HOME/Desktop/nse-analyzer/logs"
 mkdir -p "$LOG_DIR"
+
 BACKEND_LOG="$LOG_DIR/backend.log"
 FRONTEND_LOG="$LOG_DIR/frontend.log"
 
@@ -35,15 +38,8 @@ cleanup() {
         fi
     done
 
-    # Delete log files
-    if [[ -f "$BACKEND_LOG" ]]; then
-        rm -f "$BACKEND_LOG"
-        log "🗑️ Deleted backend log"
-    fi
-    if [[ -f "$FRONTEND_LOG" ]]; then
-        rm -f "$FRONTEND_LOG"
-        log "🗑️ Deleted frontend log"
-    fi
+    rm -f "$BACKEND_LOG" "$FRONTEND_LOG" || true
+    log "🗑️ Deleted logs"
 
     log "✅ Services stopped"
     exit 0
@@ -91,27 +87,44 @@ healthcheck() {
 check_directory "$BACKEND_DIR"
 check_directory "$FRONTEND_DIR"
 
-kill_port "$BACKEND_PORT"
+kill_port "$NSE_BACKEND_PORT"
+kill_port "$MCX_BACKEND_PORT"
 kill_port "$FRONTEND_PORT"
 
 # ==============================
-# BACKEND
+# BACKEND (BUILD ONCE)
 # ==============================
-log "🦀 Building Rust backend (release, no incremental)..."
+log "🦀 Building Rust backend (release)..."
 (
     cd "$BACKEND_DIR"
     CARGO_INCREMENTAL=0 cargo build --release >>"$BACKEND_LOG" 2>&1
 )
 
-log "🚀 Starting Rust backend on port $BACKEND_PORT..."
+# ==============================
+# BACKEND — NSE
+# ==============================
+log "🚀 Starting NSE backend on port $NSE_BACKEND_PORT..."
 (
     cd "$BACKEND_DIR"
-    NSE_MODE=server NSE_PORT="$BACKEND_PORT" ./target/release/nse-analyzer >>"$BACKEND_LOG" 2>&1
+    MODE=server EXCHANGE=nse PORT="$NSE_BACKEND_PORT" \
+    ./target/release/nse-analyzer >>"$BACKEND_LOG" 2>&1
 ) &
 CHILD_PIDS+=($!)
 
-# Wait for backend to be up
-healthcheck "http://127.0.0.1:$BACKEND_PORT/api/nse/securities"
+healthcheck "http://127.0.0.1:$NSE_BACKEND_PORT/nse_health"
+
+# ==============================
+# BACKEND — MCX
+# ==============================
+log "🚀 Starting MCX backend on port $MCX_BACKEND_PORT..."
+(
+    cd "$BACKEND_DIR"
+    MODE=server EXCHANGE=mcx PORT="$MCX_BACKEND_PORT" \
+    ./target/release/nse-analyzer >>"$BACKEND_LOG" 2>&1
+) &
+CHILD_PIDS+=($!)
+
+healthcheck "http://127.0.0.1:$MCX_BACKEND_PORT/mcx_health"
 
 # ==============================
 # FRONTEND
@@ -129,8 +142,10 @@ log "🚀 Starting frontend on port $FRONTEND_PORT..."
 ) &
 CHILD_PIDS+=($!)
 
-log "✅ Backend + Frontend running"
-log "Logs: backend=$BACKEND_LOG frontend=$FRONTEND_LOG"
+log "✅ NSE + MCX Backend + Frontend running"
+log "Logs:"
+log "  Backend:  $BACKEND_LOG"
+log "  Frontend: $FRONTEND_LOG"
 log "Press Ctrl+C to stop everything"
 
 # ==============================

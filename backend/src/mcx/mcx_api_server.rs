@@ -131,7 +131,7 @@ impl AppState {
 
 /// GET /mcx_health - Health check endpoint
 async fn health() -> &'static str {
-    "OK"
+    "MCX server -> OK"
 }
 
 /// GET /api/mcx/tickers - Get all available MCX tickers
