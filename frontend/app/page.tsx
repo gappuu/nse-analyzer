@@ -696,7 +696,7 @@ function CommodityCard({
 }) {
   return (
     <Link 
-      href={`/mcx-commodity/?symbol=${encodeURIComponent(commodity.name)}`} 
+      href={`/commodity/?symbol=${encodeURIComponent(commodity.name)}`} 
       className="security-card group"
       style={{ animationDelay: `${index * 0.05}s` }}
     >

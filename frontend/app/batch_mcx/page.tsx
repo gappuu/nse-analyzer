@@ -526,7 +526,7 @@ function McxCommodityResultCard({ result }: { result: McxRulesOutput }) {
           </div>
           
           <Link 
-            href={`/mcx-commodity/?symbol=${encodeURIComponent(result.symbol)}`}
+            href={`/commodity/?symbol=${encodeURIComponent(result.symbol)}`}
             className="btn-primary text-sm"
           >
             View MCX Details
