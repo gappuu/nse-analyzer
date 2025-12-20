@@ -147,7 +147,7 @@ impl MCXClient {
         let max_attempts = 5; // Don't go back more than 5 days
         
         for attempt in 0..max_attempts {
-            println!("🔍 Trying to fetch MCX data for date: {}", data_date);
+            // println!("🔍 Trying to fetch MCX data for date: {}", data_date);
             
             let payload = BhavCopyPayload {
                 date: data_date.clone(),
@@ -191,7 +191,7 @@ impl MCXClient {
             match result {
                 Ok(response) => {
                     if response.d.summary.count > 0 {
-                        println!("✅ Found {} OPTFUT entries for date {}", response.d.summary.count, data_date);
+                        // println!("✅ Found {} OPTFUT entries for date {}", response.d.summary.count, data_date);
                         return Ok(response);
                     } else {
                         println!("⚠️  No data found for date {} (count: 0), trying previous date...", data_date);
@@ -236,7 +236,7 @@ impl MCXClient {
         let bhav_copy = self.fetch_bhav_copy_with_fallback().await?;
         
         // Calculate total entries before moving the data
-        let total_entries = bhav_copy.d.data.len();
+        // let total_entries = bhav_copy.d.data.len();
         
         // Use HashSet to ensure uniqueness of Symbol-ExpiryDate combinations
         let mut unique_entries = HashSet::new();
@@ -266,8 +266,7 @@ impl MCXClient {
             }
         });
         
-        println!("📊 Extracted {} unique symbol-expiry combinations from {} total entries", 
-                 tickers.len(), total_entries);
+        // println!("📊 Extracted {} unique symbol-expiry combinations from {} total entries",  tickers.len(), total_entries);
         
         Ok(tickers)
     }
@@ -358,7 +357,7 @@ impl MCXClient {
         
         match result {
             Ok(response) => {
-                println!("✅ Successfully fetched option chain for {}", commodity);
+                // println!("✅ Successfully fetched option chain for {}", commodity);
                 Ok(response)
             }
             Err(e) => {
@@ -461,7 +460,7 @@ impl MCXClient {
     /// Session-based approach - visit the website first to establish session
     async fn fetch_future_symbols_with_session(&self) -> Result<serde_json::Value> {
         // Step 1: Visit the main option chain page to establish session
-        println!("🔄 Establishing session by visiting option chain page...");
+        // println!("🔄 Establishing session by visiting option chain page...");
         let _session_response = apply_session_headers(
             self.client.get(MCX_OPTION_CHAIN_PAGE)
         )
@@ -469,7 +468,7 @@ impl MCXClient {
         .await?;
 
         // Step 2: Now try the API call with established session
-        println!("🔄 Making API call with established session...");
+        // println!("🔄 Making API call with established session...");
         
         let res = apply_standard_get_headers(
             self.client.get(MCX_FUTURE_SYMBOLS_API),
@@ -489,7 +488,7 @@ impl MCXClient {
             let data: serde_json::Value = serde_json::from_str(&text)
                 .map_err(|e| anyhow::anyhow!("Failed to parse future symbols response: {}", e))?;
             
-            println!("✅ Successfully fetched future symbols data with session");
+            // println!("✅ Successfully fetched future symbols data with session");
             Ok(data)
         } else {
             let body = res.text().await.unwrap_or_default();
@@ -550,7 +549,7 @@ impl MCXClient {
         
         match result {
             Ok(data) => {
-                println!("✅ Successfully fetched historic data for {} {}", symbol, expiry);
+                // println!("✅ Successfully fetched historic data for {} {}", symbol, expiry);
                 Ok(data)
             }
             Err(e) => {
@@ -603,7 +602,7 @@ impl MCXClient {
         
         match result {
             Ok(data) => {
-                println!("✅ Successfully fetched future quote for {} {}", commodity, expiry);
+                // println!("✅ Successfully fetched future quote for {} {}", commodity, expiry);
                 Ok(data)
             }
             Err(e) => {
@@ -664,8 +663,8 @@ impl MCXClient {
         
         match result {
             Ok(data) => {
-                println!("✅ Successfully fetched option quote for {} {} {} {}", 
-                         commodity, expiry, option_type, strike_price);
+                // println!("✅ Successfully fetched option quote for {} {} {} {}", 
+                //          commodity, expiry, option_type, strike_price);
                 Ok(data)
             }
             Err(e) => {
@@ -766,7 +765,7 @@ impl MCXClient {
             // Log filtering details for this symbol (using metrics calculated earlier)
             if initial_count > 1 {
                 if past_count > 0 || initial_count > 1 {
-                    println!("  {} expiries → 1 (removed {} past)", initial_count, past_count);
+                    // println!("  {} expiries → 1 (removed {} past)", initial_count, past_count);
                 }
             }
         }
@@ -774,7 +773,7 @@ impl MCXClient {
         // Sort final result by symbol name
         result.sort_by(|a, b| a.symbol.cmp(&b.symbol));
         
-        println!("🔍 Filtered to {} nearest future expiry tickers", result.len());
+        // println!("🔍 Filtered to {} nearest future expiry tickers", result.len());
         if total_removed_past > 0 {
             println!("📅 Removed {} past expiries", total_removed_past);
         }
