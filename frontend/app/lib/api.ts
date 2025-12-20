@@ -37,7 +37,7 @@ export const apiClient = {
         }
       }
 
-      const response = await api.get('/api/securities');
+      const response = await api.get('/api/nse/securities');
       const apiResponse: ApiResponse<SecurityListResponse> = response.data;
 
       if (apiResponse.success && apiResponse.data) {
@@ -69,7 +69,7 @@ export const apiClient = {
         }
       }
 
-      const response = await api.get(`/api/contract-info?symbol=${encodeURIComponent(symbol)}`);
+      const response = await api.get(`/api/nse/contract-info?symbol=${encodeURIComponent(symbol)}`);
       const apiResponse: ApiResponse<ContractInfoResponse> = response.data;
 
       if (apiResponse.success && apiResponse.data) {
@@ -106,7 +106,7 @@ export const apiClient = {
       }
 
       const response = await api.get(
-        `/api/single-analysis?symbol=${encodeURIComponent(symbol)}&expiry=${encodeURIComponent(expiry)}`
+        `/api/nse/single-analysis?symbol=${encodeURIComponent(symbol)}&expiry=${encodeURIComponent(expiry)}`
       );
       const apiResponse: ApiResponse<SingleAnalysisResponse> = response.data;
 
@@ -144,7 +144,7 @@ export const apiClient = {
       }
 
       const response = await api.get(
-        `/api/futures-data?symbol=${encodeURIComponent(symbol)}&expiry=${encodeURIComponent(expiry)}`
+        `/api/nse/futures-data?symbol=${encodeURIComponent(symbol)}&expiry=${encodeURIComponent(expiry)}`
       );
       const apiResponse: ApiResponse<FuturesDataResponse> = response.data;
 
@@ -175,7 +175,7 @@ export const apiClient = {
         }
       }
 
-      const response = await api.post('/api/batch-analysis');
+      const response = await api.post('/api/nse/batch-analysis');
       const apiResponse: ApiResponse<BatchAnalysisResponse> = response.data;
 
       if (apiResponse.success && apiResponse.data) {
@@ -213,7 +213,7 @@ export const apiClient = {
       if (params.strike_price) queryParams.append('strike_price', params.strike_price);
       if (params.option_type) queryParams.append('option_type', params.option_type);
 
-      const response = await api.get(`/api/derivatives-historical?${queryParams.toString()}`);
+      const response = await api.get(`/api/nse/derivatives-historical?${queryParams.toString()}`);
       return response.data;
     } catch (error) {
       console.error('Error fetching derivatives historical data:', error);

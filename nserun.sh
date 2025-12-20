@@ -111,7 +111,7 @@ log "🚀 Starting Rust backend on port $BACKEND_PORT..."
 CHILD_PIDS+=($!)
 
 # Wait for backend to be up
-healthcheck "http://127.0.0.1:$BACKEND_PORT/api/securities"
+healthcheck "http://127.0.0.1:$BACKEND_PORT/api/nse/securities"
 
 # ==============================
 # FRONTEND

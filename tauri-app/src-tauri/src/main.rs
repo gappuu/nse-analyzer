@@ -256,7 +256,7 @@ async fn check_backend_status(backend_process: State<'_, BackendProcess>) -> Res
 async fn check_backend_health() -> Result<(), reqwest::Error> {
     let client = reqwest::Client::new();
     client
-        .get("http://localhost:3001/health")
+        .get("http://localhost:3001/nse_health")
         .timeout(Duration::from_secs(5))
         .send()
         .await?;

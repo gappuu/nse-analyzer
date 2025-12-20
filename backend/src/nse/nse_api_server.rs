@@ -138,12 +138,12 @@ impl AppState {
 // API HANDLERS
 // -----------------------------------------------
 
-/// GET /health - Health check endpoint
+/// GET /nse_health - Health check endpoint
 async fn health() -> &'static str {
     "OK"
 }
 
-/// GET /api/securities - Get all FNO securities list
+/// GET /api/nse/securities - Get all FNO securities list
 async fn get_securities(State(app_state): State<AppState>) -> Result<Json<ApiResponse<SecurityListResponse>>, StatusCode> {
     let start_time = Instant::now();
 
@@ -177,7 +177,7 @@ async fn get_securities(State(app_state): State<AppState>) -> Result<Json<ApiRes
     }
 }
 
-/// GET /api/contract-info?symbol=NIFTY - Get contract info for a symbol
+/// GET /api/nse/contract-info?symbol=NIFTY - Get contract info for a symbol
 async fn get_contract_info(
     Query(query): Query<ContractInfoQuery>,
     State(app_state): State<AppState>,
@@ -236,7 +236,7 @@ async fn get_contract_info(
     }
 }
 
-/// GET /api/single-analysis?symbol=NIFTY&expiry=30-Dec-2025 - Get single security analysis
+/// GET /api/nse/single-analysis?symbol=NIFTY&expiry=30-Dec-2025 - Get single security analysis
 async fn get_single_analysis(
     Query(query): Query<SingleAnalysisQuery>,
     State(app_state): State<AppState>,
@@ -300,7 +300,7 @@ async fn get_single_analysis(
     }
 }
 
-/// GET /api/futures-data?symbol=NIFTY&expiry=30-Dec-2025 - Get futures data
+/// GET /api/nse/futures-data?symbol=NIFTY&expiry=30-Dec-2025 - Get futures data
 async fn get_futures_data(
     Query(query): Query<FuturesDataQuery>,
     State(app_state): State<AppState>,
@@ -325,7 +325,7 @@ async fn get_futures_data(
     }
 }
 
-/// GET /api/derivatives-historical - Get derivatives historical data
+/// GET /api/nse/derivatives-historical - Get derivatives historical data
 async fn get_derivatives_historical_data(
     Query(query): Query<DerivativesHistoricalQuery>,
     State(app_state): State<AppState>,
@@ -365,7 +365,7 @@ async fn get_derivatives_historical_data(
     }
 }
 
-/// POST /api/batch-analysis - Run batch analysis
+/// POST /api/nse/batch-analysis - Run batch analysis
 async fn run_batch_analysis(
     State(app_state): State<AppState>,
 ) -> Result<Json<ApiResponse<BatchAnalysisResponse>>, StatusCode> {
@@ -512,13 +512,13 @@ pub async fn start_server(port: u16) -> Result<()> {
     let app_state = AppState::new()?;
 
     let app = Router::new()
-        .route("/health", get(health))
-        .route("/api/securities", get(get_securities))
-        .route("/api/contract-info", get(get_contract_info))
-        .route("/api/single-analysis", get(get_single_analysis))
-        .route("/api/batch-analysis", post(run_batch_analysis))
-        .route("/api/futures-data", get(get_futures_data))
-        .route("/api/derivatives-historical", get(get_derivatives_historical_data))
+        .route("/nse_health", get(health))
+        .route("/api/nse/securities", get(get_securities))
+        .route("/api/nse/contract-info", get(get_contract_info))
+        .route("/api/nse/single-analysis", get(get_single_analysis))
+        .route("/api/nse/batch-analysis", post(run_batch_analysis))
+        .route("/api/nse/futures-data", get(get_futures_data))
+        .route("/api/nse/derivatives-historical", get(get_derivatives_historical_data))
         .layer(CorsLayer::permissive())
         .with_state(app_state);
 
@@ -527,13 +527,13 @@ pub async fn start_server(port: u16) -> Result<()> {
     
     println!("🚀 NSE API Server running on http://{}", addr);
     println!("📋 Available endpoints:");
-    println!("   GET  /health");
-    println!("   GET  /api/securities");
-    println!("   GET  /api/contract-info?symbol=NIFTY");
-    println!("   GET  /api/single-analysis?symbol=NIFTY&expiry=30-Dec-2025");
-    println!("   GET  /api/futures-data?symbol=NIFTY&expiry=30-Dec-2025");
-    println!("   GET  /api/derivatives-historical?symbol=NIFTY&instrument_type=FUTURES&expiry=30-Dec-2025&from_date=06-11-2025&to_date=06-12-2025");
-    println!("   POST /api/batch-analysis");
+    println!("   GET  /nse_health");
+    println!("   GET  /api/nse/securities");
+    println!("   GET  /api/nse/contract-info?symbol=NIFTY");
+    println!("   GET  /api/nse/single-analysis?symbol=NIFTY&expiry=30-Dec-2025");
+    println!("   GET  /api/nse/futures-data?symbol=NIFTY&expiry=30-Dec-2025");
+    println!("   GET  /api/nse/derivatives-historical?symbol=NIFTY&instrument_type=FUTURES&expiry=30-Dec-2025&from_date=06-11-2025&to_date=06-12-2025");
+    println!("   POST /api/nse/batch-analysis");
     println!();
 
     axum::serve(listener, app).await?;

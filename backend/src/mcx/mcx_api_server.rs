@@ -129,7 +129,7 @@ impl AppState {
 // API HANDLERS
 // -----------------------------------------------
 
-/// GET /health - Health check endpoint
+/// GET /mcx_health - Health check endpoint
 async fn health() -> &'static str {
     "OK"
 }
@@ -699,7 +699,7 @@ pub async fn start_mcx_server(port: u16) -> Result<()> {
         .route("/api/mcx/historic-data", get(get_historic_data));
 
     let app = Router::new()
-        .route("/health", get(health))
+        .route("/mcx_health", get(health))
         .merge(mcx_routes)
         .layer(CorsLayer::permissive())
         .with_state(app_state);
@@ -709,7 +709,7 @@ pub async fn start_mcx_server(port: u16) -> Result<()> {
     
     println!("🚀 MCX API Server running on http://{}", addr);
     println!("📋 Available MCX endpoints:");
-    println!("   GET  /health");
+    println!("   GET  /mcx_health");
     println!("   GET  /api/mcx/tickers");
     println!("   GET  /api/mcx/option-chain?commodity=COPPER&expiry=23DEC2025 (Processed Data)");
     println!("   GET  /api/mcx/future-quote?commodity=ALUMINI&expiry=31DEC2025");
