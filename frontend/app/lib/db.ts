@@ -88,11 +88,23 @@ export class DataStorage {
 
 // Database keys for different data types
 export const DB_KEYS = {
+  // NSE Keys
   SECURITIES_LIST: 'securities_list',
   CONTRACT_INFO: (symbol: string) => `contract_info:${symbol}`,
   SINGLE_ANALYSIS: (symbol: string, expiry: string) => `single_analysis:${symbol}:${expiry}`,
   FUTURES_DATA: (symbol: string, expiry: string) => `futures_data:${symbol}:${expiry}`,
-  BATCH_ANALYSIS: 'batch_analysis'
+  BATCH_ANALYSIS: 'batch_analysis',
+  
+  // MCX Keys
+  MCX_TICKERS: 'mcx_tickers',
+  MCX_FUTURE_SYMBOLS: 'mcx_future_symbols',
+  MCX_OPTION_CHAIN: (commodity: string, expiry: string) => `mcx_option_chain:${commodity}:${expiry}`,
+  MCX_FUTURE_QUOTE: (commodity: string, expiry: string) => `mcx_future_quote:${commodity}:${expiry}`,
+  MCX_OPTION_QUOTE: (commodity: string, expiry: string, optionType: string, strikePrice: string) => 
+    `mcx_option_quote:${commodity}:${expiry}:${optionType}:${strikePrice}`,
+  MCX_BATCH_ANALYSIS: 'mcx_batch_analysis',
+  MCX_HISTORICAL_DATA: (symbol: string, expiry: string, fromDate: string, toDate: string) =>
+    `mcx_historical:${symbol}:${expiry}:${fromDate}:${toDate}`
 } as const;
 
 // Singleton instance

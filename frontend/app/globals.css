@@ -13,6 +13,15 @@
   --font-family-body: 'Inter', Arial, Helvetica, sans-serif;
   --font-family-mono: 'JetBrains Mono', monospace;
   
+  /* MCX Theme Variables */
+  --mcx-primary: #1A1B23;
+  --mcx-secondary: #F59E0B;
+  --mcx-accent: #D97706;
+  --mcx-surface: #44403C;
+  --mcx-gold: #FCD34D;
+  --mcx-copper: #EA580C;
+  --mcx-silver: #E5E7EB;
+  
   /* Color Palette */
   --color-green-400: #4ade80;
   --color-red-400: #f87171;
@@ -27,6 +36,50 @@ body {
   background: linear-gradient(to bottom right, var(--nse-primary), #0f172a, var(--nse-primary));
   color: #f1f5f9;
   font-family: var(--font-family-body);
+  transition: background 0.5s ease;
+}
+
+/* MCX Theme Body */
+body.mcx-theme {
+  background: linear-gradient(to bottom right, var(--mcx-primary), #0C0A09, var(--mcx-primary));
+}
+
+/* Theme-aware components */
+body.mcx-theme .card-glow {
+  background: linear-gradient(to bottom right, rgba(68, 64, 60, 0.8), rgba(26, 27, 35, 0.6));
+  border: 1px solid rgba(120, 113, 108, 0.5);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 
+              inset 0 1px 0 rgba(252, 211, 77, 0.1);
+}
+
+body.mcx-theme .security-card {
+  background: linear-gradient(to bottom right, rgba(68, 64, 60, 0.8), rgba(26, 27, 35, 0.6));
+  border: 1px solid rgba(120, 113, 108, 0.5);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 
+              inset 0 1px 0 rgba(252, 211, 77, 0.1);
+}
+
+body.mcx-theme .security-card:hover {
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(217, 119, 6, 0.3);
+}
+
+body.mcx-theme .data-table th {
+  background: linear-gradient(to right, var(--mcx-surface), #57534E);
+}
+
+body.mcx-theme .text-gradient {
+  background: linear-gradient(to right, var(--mcx-accent), var(--mcx-gold));
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+body.mcx-theme .text-gradient-blue {
+  background: linear-gradient(to right, var(--mcx-secondary), #FBBF24);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 * {
@@ -201,6 +254,68 @@ body {
   transform: scale(1);
 }
 
+/* MCX Theme Buttons */
+body.mcx-theme .btn-primary {
+  background: linear-gradient(to right, var(--mcx-secondary), #F59E0B);
+}
+
+body.mcx-theme .btn-primary:hover {
+  background: linear-gradient(to right, #D97706, var(--mcx-secondary));
+}
+
+body.mcx-theme .btn-secondary {
+  background: linear-gradient(to right, var(--mcx-surface), #57534E);
+}
+
+body.mcx-theme .btn-secondary:hover {
+  background: linear-gradient(to right, #57534E, var(--mcx-surface));
+}
+
+body.mcx-theme .btn-success {
+  background: linear-gradient(to right, var(--mcx-accent), #EA580C);
+}
+
+body.mcx-theme .btn-success:hover {
+  background: linear-gradient(to right, #C2410C, var(--mcx-accent));
+}
+
+body.mcx-theme .bg-nse-accent {
+  background: linear-gradient(to right, var(--mcx-accent), var(--mcx-secondary)) !important;
+}
+
+/* Footer Styles */
+.page-footer {
+  background: linear-gradient(to right, rgba(30, 41, 59, 0.9), rgba(51, 65, 85, 0.7));
+  backdrop-filter: blur(12px);
+  border-top: 1px solid rgba(55, 65, 81, 0.5);
+  margin-top: 4rem;
+  padding: 2rem 0;
+}
+
+body.mcx-theme .page-footer {
+  background: linear-gradient(to right, rgba(26, 27, 35, 0.9), rgba(68, 64, 60, 0.7));
+  border-top: 1px solid rgba(120, 113, 108, 0.5);
+}
+
+.footer-card {
+  background: linear-gradient(to bottom right, rgba(51, 65, 85, 0.6), rgba(30, 41, 59, 0.4));
+  border: 1px solid rgba(55, 65, 81, 0.3);
+  backdrop-filter: blur(8px);
+  border-radius: 12px;
+  padding: 1.5rem;
+  transition: all 0.3s ease;
+}
+
+body.mcx-theme .footer-card {
+  background: linear-gradient(to bottom right, rgba(68, 64, 60, 0.6), rgba(26, 27, 35, 0.4));
+  border: 1px solid rgba(120, 113, 108, 0.3);
+}
+
+.footer-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+}
+
 .data-table {
   width: 100%;
   border-collapse: collapse;
@@ -373,4 +488,19 @@ body {
   50% {
     opacity: .5;
   }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.5s ease-out;
 }

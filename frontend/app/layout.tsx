@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "NSE Options Analyzer",
-  description: "Advanced NSE F&O Options Analysis Platform",
+  title: "Multi-Market Options Analyzer",
+  description: "Advanced NSE & MCX Options Analysis Platform",
 };
 
 export default function RootLayout({
@@ -22,4 +22,3 @@ export default function RootLayout({
     </html>
   );
 }
-
