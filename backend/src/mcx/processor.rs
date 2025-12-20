@@ -102,7 +102,9 @@ pub struct McxSingleAnalysisResponse {
     pub ce_oi: f64,
     pub pe_oi: f64,
     pub processed_data: Vec<ProcessedMcxOptionData>,
-    pub alerts: Option<String>, // Placeholder for future rules implementation
+    
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub alerts: Option<super::rules::McxRulesOutput>,
 }
 
 /// Calculate days to expiry from today's date for MCX format
@@ -151,10 +153,7 @@ pub fn process_mcx_option_data(
     available_strikes.sort_by(|a, b| a.partial_cmp(b).unwrap());
     available_strikes.dedup();
     
-    // Step 4: Calculate OI rankings
-    // calculate_oi_rankings(&mut data);
-    
-    // Step 5: Process each strike with classifications
+    // Step 4: Process each strike with classifications
     let mut processed: Vec<ProcessedMcxOptionData> = Vec::new();
     let mut processed_strikes = std::collections::HashSet::new();
     
@@ -394,7 +393,7 @@ pub fn calculate_pchange_in_oi(change_in_oi: Option<f64>, open_interest: Option<
 }
 
 /// Calculate Tambu classification for MCX
-pub fn calculate_tambu(pchange_in_oi: Option<f64>,  pchange: Option<f64>) -> Option<String> {
+pub fn calculate_tambu(pchange_in_oi: Option<f64>, pchange: Option<f64>) -> Option<String> {
     let pchange_in_oi_val = pchange_in_oi.unwrap_or(0.0);
     let pchange_val = pchange.unwrap_or(0.0);
     
@@ -507,6 +506,15 @@ pub fn create_single_analysis_response(
     ce_oi: f64,
     pe_oi: f64,
 ) -> McxSingleAnalysisResponse {
+    // Run rules on processed data
+    let alerts = super::rules::run_mcx_rules(
+        &processed_data,
+        symbol.clone(),
+        convert_mcx_timestamp(&timestamp),
+        underlying_value,
+        spread,
+    );
+    
     McxSingleAnalysisResponse {
         symbol,
         timestamp: convert_mcx_timestamp(&timestamp),
@@ -516,6 +524,6 @@ pub fn create_single_analysis_response(
         ce_oi,
         pe_oi,
         processed_data,
-        alerts: None, // Placeholder for future rules implementation
+        alerts,
     }
 }

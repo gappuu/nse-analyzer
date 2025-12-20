@@ -1,6 +1,8 @@
-use super::mcx_client::MCXClient;
+use super::processor;
+use super::MCXClient;
 use super::config;
 use super::mcx_api_server;
+use super::rules;
 
 use anyhow::Result;
 use colored::Colorize;
@@ -109,8 +111,8 @@ impl MCXCommands {
         // Step 4: Display summary
         Self::display_batch_summary(&successful, &failed, timeout_count, elapsed, &tickers, &all_tickers);
 
-        // Step 5: Save results to JSON files (save both original and filtered lists)
-        Self::save_batch_results(&all_tickers, &tickers, successful).await?;
+        // Step 5: Process data and run rules (similar to NSE)
+        Self::process_batch_data_and_rules(successful).await?;
 
         println!();
         println!("{}", "=".repeat(60).blue());
@@ -223,50 +225,64 @@ impl MCXCommands {
         println!();
     }
 
-    /// Save batch results to JSON files (with both original and filtered ticker lists)
-    async fn save_batch_results(
-        _all_tickers: &[super::models::Ticker],
-        _filtered_tickers: &[super::models::Ticker],
-        successful: Vec<(super::models::Ticker, super::models::OptionChainResponse)>,
+    /// Process batch data and apply rules (similar to NSE implementation)
+    async fn process_batch_data_and_rules(
+        successful: Vec<(super::models::Ticker, super::models::OptionChainResponse)>
     ) -> Result<()> {
-        println!("{}", "Saving results to JSON files...".cyan());
+        println!("{}", "Processing data and applying rules...".cyan());
         
-        // // // Save all tickers list (for reference)
-        // std::fs::write(
-        //     "mcx_all_tickers.json",
-        //     serde_json::to_string_pretty(&all_tickers)?,
-        // )?;
-        // println!("{} Saved all tickers to mcx_all_tickers.json", "✓".green());
+        // Process each ticker's data through the processor and rules
+        let mut batch_for_rules = Vec::new();
         
-        // // // Save filtered tickers list (what was actually processed)
-        // std::fs::write(
-        //     "mcx_filtered_tickers.json",
-        //     serde_json::to_string_pretty(&filtered_tickers)?,
-        // )?;
-        // println!("{} Saved filtered tickers to mcx_filtered_tickers.json", "✓".green());
-        
-        // // Save successful option chains
-        if !successful.is_empty() {
-            let batch_data: Vec<serde_json::Value> = successful.iter().map(|(ticker, chain)| {
-                serde_json::json!({
-                    "ticker": ticker,
-                    "option_chain": chain,
-                    "processed_at": chrono::Utc::now().to_rfc3339(),
-                    "note": "Nearest future expiry only"
-                })
-            }).collect();
+        for (ticker, chain) in successful.iter() {
+            // Get underlying value from first available data point
+            let underlying_value = chain.d.data.iter()
+                .find_map(|d| d.underlying_value)
+                .unwrap_or(0.0);
             
+            // Process through the MCX processor
+            match processor::process_mcx_option_data(
+                chain.d.data.clone(),
+                underlying_value,
+                &ticker.expiry_date,
+            ) {
+                Ok((processed_data, spread, _days_to_expiry, _ce_oi, _pe_oi)) => {
+                    // Store for rules processing
+                    batch_for_rules.push((
+                        ticker.symbol.clone(),
+                        processor::convert_mcx_timestamp(&chain.d.summary.as_on.clone().unwrap_or_else(|| "".to_string())),
+                        underlying_value,
+                        processed_data,
+                        spread,
+                    ));
+                }
+                Err(e) => {
+                    println!("{} Failed to process {}: {}", "⚠".yellow(), ticker.symbol, e);
+                }
+            }
+        }
+        
+        // Run rules on all processed securities
+        let rules_outputs = rules::run_mcx_batch_rules(batch_for_rules);
+        
+        // Save only the rules output (alerts) - similar to NSE
+        if !rules_outputs.is_empty() {
             std::fs::write(
                 "mcx_batch_results.json",
-                serde_json::to_string_pretty(&batch_data)?,
+                serde_json::to_string_pretty(&rules_outputs)?,
             )?;
             
-            println!("{} Saved option chains to mcx_batch_results.json", "✓".green());
-            println!("{} Successfully processed: {} nearest future expiry contracts", "ℹ".blue(), successful.len());
+            let total_alerts: usize = rules_outputs.iter()
+                .map(|r| r.alerts.len())
+                .sum();
+            
+            println!("{} Saved alerts to mcx_batch_results.json", "✓".green());
+            println!("{} Securities with alerts: {}", "ℹ".blue(), rules_outputs.len());
+            println!("{} Total alerts: {}", "ℹ".blue(), total_alerts);
         } else {
             // Create empty file for consistency
             std::fs::write("mcx_batch_results.json", "[]")?;
-            println!("{} No successful results to save", "ℹ".blue());
+            println!("{} No alerts found across all securities", "ℹ".blue());
             println!("{} Created empty results file: mcx_batch_results.json", "✓".green());
         }
 

@@ -72,7 +72,7 @@ pub struct TickerListResponse {
 #[derive(Debug, Serialize)]
 pub struct BatchAnalysisResponse {
     pub summary: BatchSummary,
-    pub results: Vec<BatchResult>,
+    pub rules_output: Vec<super::rules::McxRulesOutput>,
 }
 
 #[derive(Debug, Serialize)]
@@ -82,13 +82,15 @@ pub struct BatchSummary {
     pub filtered_latest_expiry: usize,
     pub successful: usize,
     pub failed: usize,
+    pub securities_with_alerts: usize,
+    pub total_alerts: usize,
     pub processing_time_ms: u64,
 }
 
 #[derive(Debug, Serialize)]
 pub struct BatchResult {
     pub ticker: Ticker,
-    pub processed_data: Option<processor::McxSingleAnalysisResponse>,
+    pub rules_output: Option<super::rules::McxRulesOutput>,
     pub error: Option<String>,
 }
 
@@ -347,10 +349,11 @@ async fn run_batch_analysis(
         .fetch_all_option_chains(filtered_tickers.clone(), max_concurrent)
         .await;
 
-    // Step 4: Process results and apply processor
+    // Step 4: Process results and apply processor + rules
     let mut batch_results = Vec::new();
     let mut successful_count = 0;
     let mut failed_count = 0;
+    let mut batch_for_rules = Vec::new();
 
     for (ticker, result) in filtered_tickers.iter().zip(results.iter()) {
         match result {
@@ -366,30 +369,23 @@ async fn run_batch_analysis(
                     underlying_value,
                     &ticker.expiry_date,
                 ) {
-                    Ok((processed_data, spread, days_to_expiry, ce_oi, pe_oi)) => {
-                        let processed_response = processor::create_single_analysis_response(
+                    Ok((processed_data, spread, _days_to_expiry, _ce_oi, _pe_oi)) => {
+                        // Store for rules processing
+                        batch_for_rules.push((
                             ticker.symbol.clone(),
                             chain.d.summary.as_on.clone().unwrap_or_else(|| "".to_string()),
                             underlying_value,
                             processed_data,
                             spread,
-                            days_to_expiry,
-                            ce_oi,
-                            pe_oi,
-                        );
+                        ));
                         
                         successful_count += 1;
-                        batch_results.push(BatchResult {
-                            ticker: ticker.clone(),
-                            processed_data: Some(processed_response),
-                            error: None,
-                        });
                     }
                     Err(e) => {
                         failed_count += 1;
                         batch_results.push(BatchResult {
                             ticker: ticker.clone(),
-                            processed_data: None,
+                            rules_output: None,
                             error: Some(format!("Processing error: {}", e)),
                         });
                     }
@@ -399,12 +395,37 @@ async fn run_batch_analysis(
                 failed_count += 1;
                 batch_results.push(BatchResult {
                     ticker: ticker.clone(),
-                    processed_data: None,
+                    rules_output: None,
                     error: Some(e.to_string()),
                 });
             }
         }
     }
+    
+    // Step 5: Run rules on all successfully processed securities
+    let rules_outputs = super::rules::run_mcx_batch_rules(batch_for_rules);
+    
+    // Step 6: Add rules outputs to batch results (only securities with alerts)
+    for rules_output in rules_outputs {
+        // Find the corresponding ticker for this symbol
+        if let Some(ticker) = filtered_tickers.iter().find(|t| t.symbol == rules_output.symbol) {
+            batch_results.push(BatchResult {
+                ticker: ticker.clone(),
+                rules_output: Some(rules_output),
+                error: None,
+            });
+        }
+    }
+
+    // Calculate alerts count
+    let securities_with_alerts = batch_results.iter()
+        .filter(|r| r.rules_output.is_some())
+        .count();
+        
+    let total_alerts: usize = batch_results.iter()
+        .filter_map(|r| r.rules_output.as_ref())
+        .map(|r| r.alerts.len())
+        .sum();
 
     let summary = BatchSummary {
         total_tickers,
@@ -412,19 +433,29 @@ async fn run_batch_analysis(
         filtered_latest_expiry: filtered_count,
         successful: successful_count,
         failed: failed_count,
+        securities_with_alerts,
+        total_alerts,
         processing_time_ms: start_time.elapsed().as_millis() as u64,
     };
+
+    // Extract only the rules outputs (alerts) for the response
+    let rules_outputs: Vec<super::rules::McxRulesOutput> = batch_results
+        .into_iter()
+        .filter_map(|r| r.rules_output)
+        .collect();
 
     println!("✅ Batch analysis completed:");
     println!("   Successful: {}/{}", successful_count, filtered_count);
     println!("   Failed: {}/{}", failed_count, filtered_count);
+    println!("   Securities with alerts: {}", securities_with_alerts);
+    println!("   Total alerts: {}", total_alerts);
     println!("   Processing time: {}ms", summary.processing_time_ms);
 
     Ok(Json(ApiResponse {
         success: true,
         data: Some(BatchAnalysisResponse {
             summary,
-            results: batch_results,
+            rules_output: rules_outputs,
         }),
         error: None,
         processing_time_ms: Some(start_time.elapsed().as_millis() as u64),
