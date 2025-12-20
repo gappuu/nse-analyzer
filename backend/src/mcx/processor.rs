@@ -103,7 +103,6 @@ pub struct McxSingleAnalysisResponse {
     pub pe_oi: f64,
     pub processed_data: Vec<ProcessedMcxOptionData>,
     
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub alerts: Option<super::rules::McxRulesOutput>,
 }
 
