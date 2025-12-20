@@ -101,20 +101,56 @@ export interface BatchAnalysisResponse {
   rules_output: RulesOutput[];
 }
 
-// MCX Futures Quote Response Structure
+// MCX Futures Quote Response Structure (Raw API response)
+export interface McxFutureQuoteApiResponse {
+  success: boolean;
+  data: {
+    d: {
+      Data: Array<{
+        AbsoluteChange: number;
+        ChangeInOpenInterest: number;
+        ExpiryDate: string;
+        OpenInterest: number;
+        PercentChange: number;
+        PreviousClose: number;
+        TradingUnit: string;
+        Productdesc: string;
+        LifeTimeHigh: number;
+        AveragePrice: number;
+        LifeTimeLow: number;
+        LTP: number;
+      }>;
+      Summary: {
+        AsOn: string; // Format: "/Date(1766168956660)/"
+      };
+    };
+  };
+  error: string | null;
+  processing_time_ms: number;
+}
+
+// MCX Futures Quote Response Structure (For API client)
 export interface McxFutureQuoteResponse {
-  symbol: string;
-  timestamp: string;
-  data: Array<{
-    symbol: string;
-    underlyingValue: number;
-    lastPrice: number;
-    change: number;
-    pchange: number;
-    openInterest: number;
-    changeinOpenInterest: number;
-    pchangeinOpenInterest: number;
-  }>;
+  d: {
+    Data: Array<{
+      AbsoluteChange: number;
+      ChangeInOpenInterest: number;
+      ExpiryDate: string;
+      OpenInterest: number;
+      PercentChange: number;
+      PreviousClose: number;
+      TradingUnit: string;
+      Productdesc: string;
+      LifeTimeHigh: number;
+      AveragePrice: number;
+      LifeTimeLow: number;
+      Category: string;
+      LTP: number;
+    }>;
+    Summary: {
+      AsOn: string; // Format: "/Date(1766168956660)/"
+    };
+  };
 }
 
 // MCX Future Analysis Helper Interface
@@ -126,6 +162,18 @@ export interface McxFutureAnalysis {
   lastPrice: number;
   openInterest: number;
   changeinOpenInterest: number;
+  expiryDate?: string;
+  percentChange?: number;
+  absoluteChange?: number;
+  previousClose?: number;
+  asOnTimestamp?: string;
+  Productdesc?: string;
+  LifeTimeHigh?: number;
+  AveragePrice?: number;
+  LifeTimeLow?: number;
+  Category?: string;
+  TradingUnit?: string;
+  LTP?: number;
 }
 
 // MCX Option Quote Response Structure  

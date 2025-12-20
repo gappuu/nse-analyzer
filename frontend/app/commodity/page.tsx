@@ -34,7 +34,7 @@ import {
   // McxTickersResponse,
   // McxFutureSymbolsResponse,
   McxOptionChainResponse,
-  // McxFutureQuoteResponse,
+  McxFutureQuoteResponse,
   McxFutureAnalysis,
   CombinedCommodityData,
   // ProcessedOptionData,
@@ -52,6 +52,8 @@ function CommodityPageContent() {
   const [selectedType, setSelectedType] = useState<'options' | 'futures'>('options');
   const [analysisData, setAnalysisData] = useState<McxDataWithAge<McxOptionChainResponse> | null>(null);
   const [futuresQuote, setFuturesQuote] = useState<McxFutureAnalysis | null>(null);
+  const [latestFuturesData, setLatestFuturesData] = useState<McxFutureAnalysis | null>(null);
+  const [futuresData, setFuturesData] = useState<McxDataWithAge<McxFutureQuoteResponse> | null>(null);
   const [loading, setLoading] = useState(true);
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [fetching, setFetching] = useState(false);
@@ -83,7 +85,21 @@ function CommodityPageContent() {
     return db.getDataAge(lastUpdated, currentTime);
   };
 
-  // Function to calculate real-time age from data timestamp string
+  // Function to convert MCX date format "/Date(1766168956660)/" to readable timestamp
+  const convertMcxDate = (mcxDateString: string): string => {
+    try {
+      // Extract the epoch timestamp from "/Date(1766168956660)/"
+      const match = mcxDateString.match(/\/Date\((\d+)\)\//);
+      if (match) {
+        const timestamp = parseInt(match[1]);
+        return new Date(timestamp).toLocaleString();
+      }
+      return mcxDateString;
+    } catch (error) {
+      console.error('Error converting MCX date:', error);
+      return mcxDateString;
+    }
+  };
   const getDataTimestampAge = (timestampString?: string) => {
     try {
       if (!timestampString) return 'unknown';
@@ -109,48 +125,109 @@ function CommodityPageContent() {
     }
   };
 
-  // Function to fetch futures quote
+  // Function to fetch futures quote with new MCX API structure
   const fetchFuturesQuote = async (expiry: string, forceRefresh = false) => {
     if (!symbol || !expiry) return;
     
     try {
       setFuturesLoading(true);
       
-      const response = await mcxApiClient.getFutureQuote(symbol, expiry, forceRefresh);
+      // Format expiry for API (DDMMMYYYY)
+      const formattedExpiry = formatExpiryForAPI(expiry);
       
-      if (response.success && response.data && response.data.data && response.data.data.length > 0) {
-        const data = response.data.data[0];
-        const { pchange, pchangeinOpenInterest, underlyingValue, lastPrice, openInterest, changeinOpenInterest } = data;
-        
-        let action = '';
-        let color = '';
-        
-        if (pchange > 0 && pchangeinOpenInterest > 0) {
-          action = 'Long Buildup';
-          color = 'text-green-400';
-        } else if (pchange > 0 && pchangeinOpenInterest < 0) {
-          action = 'Short Covering';
-          color = 'text-gray-300';
-        } else if (pchange < 0 && pchangeinOpenInterest > 0) {
-          action = 'Short Buildup';
-          color = 'text-red-400';
-        } else if (pchange < 0 && pchangeinOpenInterest < 0) {
-          action = 'Long Covering';
-          color = 'text-gray-300';
+      const response = await mcxApiClient.getFutureQuote(symbol, formattedExpiry, forceRefresh);
+      
+      if (response.success && response.data) {
+        // The response.data is the content from the MCX API
+        if (response.data.d && response.data.d.Data && response.data.d.Data.length > 0) {
+          const data = response.data.d.Data[0];
+          const summary = response.data.d.Summary;
+          const {
+            PercentChange: pchange,
+            ChangeInOpenInterest: changeInOI,
+            OpenInterest: openInterest,
+            PreviousClose: previousClose,
+            AbsoluteChange: absoluteChange,
+            ExpiryDate: expiryDate,
+            Productdesc: Productdesc,
+            LifeTimeHigh: LifeTimeHigh,
+            AveragePrice: AveragePrice,
+            LifeTimeLow: LifeTimeLow,
+            LTP: LTP,
+            TradingUnit: TradingUnit,
+            Category: Category
+          } = data;
+          
+          // Calculate pchangeinOpenInterest
+          const pchangeinOpenInterest = changeInOI / (changeInOI + openInterest);
+          
+          let action = '';
+          let color = '';
+          
+          if (pchange > 0 && pchangeinOpenInterest > 0) {
+            action = 'Long Buildup';
+            color = 'text-green-400';
+          } else if (pchange > 0 && pchangeinOpenInterest < 0) {
+            action = 'Short Covering';
+            color = 'text-gray-300';
+          } else if (pchange < 0 && pchangeinOpenInterest > 0) {
+            action = 'Short Buildup';
+            color = 'text-red-400';
+          } else if (pchange < 0 && pchangeinOpenInterest < 0) {
+            action = 'Long Covering';
+            color = 'text-gray-300';
+          } else {
+            action = 'Neutral';
+            color = 'text-gray-400';
+          }
+          
+          const asOnTimestamp = convertMcxDate(summary.AsOn);
+          
+          const futureAnalysis: McxFutureAnalysis = {
+            action,
+            color,
+            underlyingValue: previousClose, // Use previous close as underlying value
+            timestamp: asOnTimestamp,
+            lastPrice: previousClose + absoluteChange, // Current price
+            openInterest,
+            changeinOpenInterest: changeInOI,
+            expiryDate,
+            percentChange: pchange,
+            absoluteChange,
+            previousClose,
+            asOnTimestamp,
+            Productdesc,
+            LifeTimeHigh,
+            AveragePrice,
+            LifeTimeLow,
+            LTP,
+            TradingUnit,
+            Category
+          };
+          
+          setFuturesQuote(futureAnalysis);
+          
+          // Store the raw response data for detailed view
+          const dataWithAge: McxDataWithAge<McxFutureQuoteResponse> = {
+            data: response.data,
+            age: response.lastUpdated ? db.getDataAge(response.lastUpdated) : 'just now',
+            lastUpdated: response.lastUpdated || Date.now(),
+            fromCache: response.fromCache || false
+          };
+          setFuturesData(dataWithAge);
         } else {
-          action = 'Neutral';
-          color = 'text-gray-400';
+          console.error('Invalid futures data structure:', response.data);
+          setFuturesQuote({
+            action: 'No Data',
+            color: 'text-gray-500',
+            underlyingValue: 0,
+            timestamp: '',
+            lastPrice: 0,
+            openInterest: 0,
+            changeinOpenInterest: 0
+          });
+          setFuturesData(null);
         }
-        
-        setFuturesQuote({
-          action,
-          color,
-          underlyingValue,
-          timestamp: response.data.timestamp || '',
-          lastPrice,
-          openInterest,
-          changeinOpenInterest
-        });
       } else {
         console.error('No futures data available or API error:', response.error);
         setFuturesQuote({
@@ -162,6 +239,7 @@ function CommodityPageContent() {
           openInterest: 0,
           changeinOpenInterest: 0
         });
+        setFuturesData(null);
       }
     } catch (error) {
       console.error('Error fetching futures quote:', error);
@@ -174,8 +252,82 @@ function CommodityPageContent() {
         openInterest: 0,
         changeinOpenInterest: 0
       });
+      setFuturesData(null);
     } finally {
       setFuturesLoading(false);
+    }
+  };
+
+  // Function to fetch latest futures data for header display
+  const fetchLatestFuturesData = async () => {
+    console.log('Commodity Data Future Expiries:', commodityData?.data.futureExpiries);
+    if (!symbol || !commodityData?.data.futureExpiries.length) return;
+    try {
+      // Get the latest (first) futures expiry
+      const latestExpiry = commodityData.data.futureExpiries[0];
+      const formattedExpiry = formatExpiryForAPI(latestExpiry);
+      console.log('Fetching latest futures data for', symbol, 'expiry', formattedExpiry);
+      const response = await mcxApiClient.getFutureQuote(symbol, formattedExpiry, false);
+      
+      if (response.success && response.data) {
+        if (response.data.d && response.data.d.Data && response.data.d.Data.length > 0) {
+          const data = response.data.d.Data[0];
+          const summary = response.data.d.Summary;
+          
+          const {
+            PercentChange: pchange,
+            ChangeInOpenInterest: changeInOI,
+            OpenInterest: openInterest,
+            PreviousClose: previousClose,
+            AbsoluteChange: absoluteChange,
+            ExpiryDate: expiryDate,
+            LTP: LTP
+          } = data;
+          
+          // Calculate pchangeinOpenInterest
+          const pchangeinOpenInterest = changeInOI / (changeInOI + openInterest);
+          
+          let action = '';
+          let color = '';
+          
+          if (pchange > 0 && pchangeinOpenInterest > 0) {
+            action = 'Long Buildup';
+            color = 'text-green-400';
+          } else if (pchange > 0 && pchangeinOpenInterest < 0) {
+            action = 'Short Covering';
+            color = 'text-gray-300';
+          } else if (pchange < 0 && pchangeinOpenInterest > 0) {
+            action = 'Short Buildup';
+            color = 'text-red-400';
+          } else if (pchange < 0 && pchangeinOpenInterest < 0) {
+            action = 'Long Covering';
+            color = 'text-gray-300';
+          } else {
+            action = 'Neutral';
+            color = 'text-gray-400';
+          }
+          
+          const asOnTimestamp = convertMcxDate(summary.AsOn);
+          
+          setLatestFuturesData({
+            action,
+            color,
+            underlyingValue: previousClose,
+            timestamp: asOnTimestamp,
+            lastPrice: previousClose + absoluteChange,
+            openInterest,
+            changeinOpenInterest: changeInOI,
+            expiryDate,
+            percentChange: pchange,
+            absoluteChange,
+            previousClose,
+            LTP,
+            asOnTimestamp
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching latest futures data:', error);
     }
   };
 
@@ -246,6 +398,11 @@ function CommodityPageContent() {
           } else if (combinedData.futureExpiries.length > 0) {
             setSelectedExpiry(combinedData.futureExpiries[0]);
             setSelectedType('futures');
+          }
+          
+          // Fetch latest futures data for header display
+          if (combinedData.futureExpiries.length > 0) {
+            setTimeout(() => fetchLatestFuturesData(), 100);
           }
         } else {
           setError(tickersResponse.error || futureSymbolsResponse.error || 'Failed to load commodity data');
@@ -486,35 +643,35 @@ function CommodityPageContent() {
                   {[...commodityData.data.optionExpiries]
                     .sort((a, b) => parseExpiry(a) - parseExpiry(b))
                     .map((expiry) => (
-                      <button
-                        key={`option-${expiry}`}
-                        onClick={() => handleExpirySelect(expiry, 'options')}
-                        disabled={analysisLoading || analysisFetching}
-                        className={`p-3 rounded-lg font-medium transition-all ${
-                          selectedExpiry === expiry && selectedType === 'options'
-                            ? 'bg-nse-accent text-white shadow-lg'
-                            : 'bg-slate-700 text-gray-300 hover:bg-slate-600'
-                        } ${(analysisLoading || analysisFetching) ? 'opacity-50 cursor-not-allowed' : ''}`}
-                      >
-                        <div className="text-xs text-gray-400 mb-1">OPT</div>
-                        {expiry}
-                      </button>
-                    ))}
+                    <button
+                      key={`option-${expiry}`}
+                      onClick={() => handleExpirySelect(expiry, 'options')}
+                      disabled={analysisLoading || analysisFetching}
+                      className={`p-3 rounded-lg font-medium transition-all ${
+                        selectedExpiry === expiry && selectedType === 'options'
+                          ? 'bg-nse-accent text-white shadow-lg'
+                          : 'bg-slate-700 text-gray-300 hover:bg-slate-600'
+                      } ${(analysisLoading || analysisFetching) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                      <div className="text-xs text-gray-400 mb-1">OPT</div>
+                      {expiry}
+                    </button>
+                  ))}
                 </div>
               </div>
             )}
 
             {/* Futures Expiries */}
             {commodityData.data.futureExpiries.length > 0 && (
-            <div>
-              <div className="flex items-center gap-3 mb-3">
-                <BarChart className="w-4 h-4 text-nse-accent" />
+              <div>
+                <div className="flex items-center gap-3 mb-3">
+                  <BarChart className="w-4 h-4 text-nse-accent" />
                 <h3 className="text-lg font-medium text-gray-200">
                   Futures Expiries ({commodityData.data.futureExpiries.length})
                 </h3>
-              </div>
+                </div>
 
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
                 {[...commodityData.data.futureExpiries]
                   .sort((a, b) => parseExpiry(a) - parseExpiry(b))
                   .map((expiry) => (
@@ -532,9 +689,9 @@ function CommodityPageContent() {
                       {expiry}
                     </button>
                   ))}
+                </div>
               </div>
-            </div>
-          )}
+            )}
           </section>
         )}
 
@@ -726,17 +883,18 @@ function CommodityPageContent() {
 
                               <td>
                                 <div className="font-bold">
-                                  COMMODITY OPTIONS
-                                  {futuresQuote && (
-                                    <span className={`text-l ${futuresQuote.color}`}>
-                                      {futuresQuote.action}
+                                  FUTURES
+                                  
+                                  {latestFuturesData && (
+                                    <span className={`text-l ${latestFuturesData.color}`}>
+                                      {latestFuturesData.action}
                                     </span>
                                   )}
                                 </div>
                                 <div>
-                                  {futuresQuote && `₹ ${futuresQuote.lastPrice.toLocaleString("en-IN")}`}
+                                  {latestFuturesData && `₹ ${latestFuturesData.lastPrice.toLocaleString("en-IN")}`}
                                 </div>
-                                <div><sub>{futuresQuote?.timestamp}: {getDataTimestampAge(futuresQuote?.timestamp)}</sub></div>
+                                <div><sub>{latestFuturesData?.expiryDate}: {getDataTimestampAge(latestFuturesData?.timestamp)}</sub></div>
                               </td>
 
                               <td className="px-6 py-4 text-right" colSpan={2}>
@@ -909,54 +1067,138 @@ function CommodityPageContent() {
 
             {/* Futures Analysis */}
             {selectedType === 'futures' && (
-              <div className="card-glow rounded-lg p-8 text-center">
-                <div className="flex items-center justify-center mb-6">
-                  {futuresLoading ? (
-                    <Loader2 className="w-8 h-8 animate-spin text-nse-accent" />
-                  ) : (
-                    <BarChart className="w-8 h-8 text-nse-accent" />
-                  )}
-                </div>
-                
-                <h3 className="text-xl font-semibold text-gray-100 mb-4">
-                  {symbol} Futures - {selectedExpiry}
-                </h3>
-                
+              <div className="space-y-6">
+                {/* Futures Data Age and Fetch Controls */}
+                {futuresData && (
+                  <div className="card-glow rounded-lg p-4">
+                    <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+                      <div className="flex items-center gap-3 text-sm">
+                        <div className="flex items-center gap-2">
+                          {futuresData.fromCache ? (
+                            <Database className="w-4 h-4 text-blue-400" />
+                          ) : (
+                            <Clock className="w-4 h-4 text-green-400" />
+                          )}
+                          <span className="text-gray-400">
+                            Futures data {futuresData.fromCache ? 'from cache' : 'freshly fetched'} for {selectedExpiry}
+                          </span>
+                        </div>
+                        <span className="text-gray-500">•</span>
+                        <div className="flex items-center gap-2">
+                          <Clock className="w-4 h-4 text-gray-500" />
+                          <span className="text-gray-400">Updated {getRealTimeAge(futuresData.lastUpdated)}</span>
+                        </div>
+                      </div>
+                      
+                      <button
+                        onClick={handleFetchAnalysis}
+                        disabled={futuresLoading}
+                        className="btn-secondary inline-flex items-center text-sm"
+                      >
+                        {futuresLoading ? (
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        ) : (
+                          <RefreshCw className="w-4 h-4 mr-2" />
+                        )}
+                        {futuresLoading ? 'Fetching...' : 'Fetch Data'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {futuresLoading ? (
-                  <p className="text-gray-400">Loading futures data...</p>
+                  <div className="card-glow rounded-lg p-12 text-center">
+                    <Loader2 className="w-8 h-8 animate-spin mx-auto text-nse-accent mb-4" />
+                    <p className="text-gray-400">Loading futures data for {symbol} ({selectedExpiry})...</p>
+                  </div>
                 ) : futuresQuote ? (
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                      <div className="text-center">
-                        <p className="text-gray-400 text-sm">Last Price</p>
+                  <>
+                    {/* Futures Summary Cards */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                      <div className="card-glow rounded-lg p-6">
+                        <div className="flex items-center gap-3 mb-2">
+                          <span className="text-sm text-gray-400">Lifetime High :{futuresQuote.LifeTimeHigh?.toFixed(2)}</span>
+                        </div>
+                          <span className="text-sm text-gray-400"> average price {futuresQuote.AveragePrice?.toFixed(2)}</span>
+                        <p className="text-sm text-gray-400">Lifetime Low {futuresQuote.LifeTimeLow?.toFixed(2)}</p>
+                      </div>
+
+                      <div className="card-glow rounded-lg p-6">
+                        <div className="flex items-center gap-3 mb-2">
+                          <span className="text-sm text-gray-400">Last Traded Price</span>
+                        </div>
                         <p className="text-2xl font-bold text-gray-100">
-                          ₹{futuresQuote.lastPrice.toFixed(2)}
+                          ₹{futuresQuote.LTP?.toFixed(2)}
+                        </p>
+                        <p className={`text-sm mt-1 ${futuresQuote.percentChange && futuresQuote.percentChange >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                          {futuresQuote.absoluteChange && futuresQuote.absoluteChange >= 0 ? '+' : ''}₹{futuresQuote.absoluteChange?.toFixed(2)} 
+                          ({futuresQuote.percentChange && futuresQuote.percentChange >= 0 ? '+' : ''}{futuresQuote.percentChange?.toFixed(2)}%)
                         </p>
                       </div>
-                      <div className="text-center">
-                        <p className="text-gray-400 text-sm">Action</p>
-                        <p className={`text-xl font-bold ${futuresQuote.color}`}>
+
+                      <div className="card-glow rounded-lg p-6">
+                        <div className="flex items-center gap-3 mb-2">
+                          <span className="text-sm text-gray-400">Action Analysis</span>
+                        </div>
+                        <p className={`text-2xl font-bold ${futuresQuote.color}`}>
                           {futuresQuote.action}
                         </p>
+                        <p className="text-sm text-gray-500 mt-1">market sentiment</p>
                       </div>
-                      <div className="text-center">
-                        <p className="text-gray-400 text-sm">Open Interest</p>
+
+                      <div className="card-glow rounded-lg p-6">
+                        <div className="flex items-center gap-3 mb-2">
+                          <span className="text-sm text-gray-400">Open Interest</span>
+                        </div>
                         <p className="text-2xl font-bold text-gray-100">
                           {futuresQuote.openInterest.toLocaleString("en-IN")}
                         </p>
+                        <p className={`text-sm mt-1 ${futuresQuote.changeinOpenInterest >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                          {futuresQuote.changeinOpenInterest >= 0 ? '+' : ''}{futuresQuote.changeinOpenInterest.toLocaleString("en-IN")} change
+                        </p>
                       </div>
                     </div>
-                    
-                    <button
-                      onClick={handleFetchAnalysis}
-                      className="btn-primary mt-4"
-                    >
-                      <RefreshCw className="w-4 h-4 mr-2" />
-                      Refresh Futures Data
-                    </button>
-                  </div>
+
+                    {/* Futures Details */}
+                    <div className="card-glow rounded-lg p-6">
+                      <div className="flex items-center gap-3 mb-4">
+                        <BarChart className="w-5 h-5 text-nse-accent" />
+                        <h2 className="text-xl font-semibold text-gray-100 ">
+                          {futuresQuote.Productdesc} <i>Futures Contract of </i> {futuresQuote.expiryDate}
+                        </h2>
+                      </div>
+                      
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+                        <div className="text-center">
+                          <p className="text-gray-400 text-sm">Unit</p>
+                          <p className="text-xl font-bold text-gray-100">
+                            {futuresQuote.TradingUnit}
+                          </p>
+                        </div>
+                        <div className="text-center">
+                          <p className="text-gray-400 text-sm">Data As On</p>
+                          <p className="text-lg font-medium text-gray-100">
+                            {futuresQuote.asOnTimestamp}
+                          </p>
+                        </div>
+                        <div className="text-center">
+                          <p className="text-gray-400 text-sm">Category</p>
+                          <p className="text-lg font-medium text-nse-accent">
+                            {futuresQuote.Category}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                  </>
                 ) : (
-                  <p className="text-gray-500">No futures data available for this expiry</p>
+                  <div className="card-glow rounded-lg p-8 text-center">
+                    <BarChart className="w-8 h-8 text-nse-accent mx-auto mb-4" />
+                    <h3 className="text-xl font-semibold text-gray-100 mb-4">
+                      {symbol} Futures - {selectedExpiry}
+                    </h3>
+                    <p className="text-gray-500">No futures data available for this expiry</p>
+                  </div>
                 )}
               </div>
             )}
