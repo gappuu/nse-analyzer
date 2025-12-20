@@ -579,12 +579,25 @@ async fn get_future_symbols(State(app_state): State<AppState>) -> Result<Json<Ap
         let cache = app_state.cache.read().await;
         if let Some((data, cached_at)) = &cache.future_symbols {
             if cached_at.elapsed() < CACHE_DURATION {
-                return Ok(Json(ApiResponse {
-                    success: true,
-                    data: Some(data.clone()),
-                    error: None,
-                    processing_time_ms: Some(start_time.elapsed().as_millis() as u64),
-                }));
+                // Process the cached data
+                match processor::process_mcx_future_symbols(data.clone()) {
+                    Ok(processed_data) => {
+                        return Ok(Json(ApiResponse {
+                            success: true,
+                            data: Some(processed_data),
+                            error: None,
+                            processing_time_ms: Some(start_time.elapsed().as_millis() as u64),
+                        }));
+                    }
+                    Err(e) => {
+                        return Ok(Json(ApiResponse {
+                            success: false,
+                            data: None,
+                            error: Some(format!("Failed to process future symbols data: {}", e)),
+                            processing_time_ms: Some(start_time.elapsed().as_millis() as u64),
+                        }));
+                    }
+                }
             }
         }
     }
@@ -592,18 +605,31 @@ async fn get_future_symbols(State(app_state): State<AppState>) -> Result<Json<Ap
     // Fetch from MCX API
     match app_state.client.fetch_future_symbols().await {
         Ok(data) => {
-            // Update cache
+            // Update cache with raw data
             {
                 let mut cache = app_state.cache.write().await;
                 cache.future_symbols = Some((data.clone(), Instant::now()));
             }
 
-            Ok(Json(ApiResponse {
-                success: true,
-                data: Some(data),
-                error: None,
-                processing_time_ms: Some(start_time.elapsed().as_millis() as u64),
-            }))
+            // Process the data (parse JSON string and convert timestamps)
+            match processor::process_mcx_future_symbols(data) {
+                Ok(processed_data) => {
+                    Ok(Json(ApiResponse {
+                        success: true,
+                        data: Some(processed_data),
+                        error: None,
+                        processing_time_ms: Some(start_time.elapsed().as_millis() as u64),
+                    }))
+                }
+                Err(e) => {
+                    Ok(Json(ApiResponse {
+                        success: false,
+                        data: None,
+                        error: Some(format!("Failed to process future symbols data: {}", e)),
+                        processing_time_ms: Some(start_time.elapsed().as_millis() as u64),
+                    }))
+                }
+            }
         }
         Err(e) => Ok(Json(ApiResponse {
             success: false,

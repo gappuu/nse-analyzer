@@ -495,6 +495,78 @@ pub fn get_max_oi(opt: &ProcessedMcxOptionData) -> f64 {
     ce_oi.max(pe_oi)
 }
 
+/// Convert MCX timestamp to date only format (without time)
+pub fn convert_mcx_timestamp_to_date(mcx_timestamp: &str) -> String {
+    // Extract epoch from "/Date(1766159098000)/" format
+    if let Some(start) = mcx_timestamp.find('(') {
+        if let Some(end) = mcx_timestamp.find(')') {
+            if let Ok(epoch_millis) = mcx_timestamp[start + 1..end].parse::<i64>() {
+                // Convert milliseconds to seconds for DateTime
+                let epoch_secs = epoch_millis / 1000;
+                let naive = DateTime::from_timestamp(epoch_secs, 0);
+                
+                if let Some(dt) = naive {
+                    // Convert to local timezone and format as date only
+                    let local_dt = dt.with_timezone(&chrono::Local);
+                    return local_dt.format("%d-%b-%Y").to_string();
+                }
+            }
+        }
+    }
+    
+    // Fallback to current date if parsing fails
+    Local::now().format("%d-%b-%Y").to_string()
+}
+
+/// Process MCX future symbols data - parse JSON string, group by Product, and format dates
+pub fn process_mcx_future_symbols(json_string_data: serde_json::Value) -> Result<serde_json::Value> {
+    // The data comes as a JSON string inside the JSON response, need to parse it
+    let json_str = json_string_data.as_str()
+        .ok_or_else(|| anyhow!("Future symbols data is not a string"))?;
+    
+    // Parse the inner JSON string
+    let symbols: Vec<serde_json::Value> = serde_json::from_str(json_str)
+        .map_err(|e| anyhow!("Failed to parse future symbols JSON: {}", e))?;
+    
+    // Group by Product and collect expiry dates
+    let mut products: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+    
+    for symbol in symbols {
+        if let Some(obj) = symbol.as_object() {
+            if let (Some(product), Some(end_date)) = (
+                obj.get("Product").and_then(|v| v.as_str()),
+                obj.get("EndDate").and_then(|v| v.as_str())
+            ) {
+                let formatted_date = convert_mcx_timestamp_to_date(end_date);
+                products.entry(product.to_string())
+                    .or_insert_with(Vec::new)
+                    .push(formatted_date);
+            }
+        }
+    }
+    
+    // Sort expiry dates for each product and remove duplicates
+    for dates in products.values_mut() {
+        dates.sort();
+        dates.dedup();
+    }
+    
+    // Create the response structure
+    let response = serde_json::json!({
+        "InstrumentName": "FUTCOM",
+        "Products": products.into_iter()
+            .map(|(product, dates)| {
+                serde_json::json!({
+                    "Product": product,
+                    "ExpiryDates": dates
+                })
+            })
+            .collect::<Vec<_>>()
+    });
+    
+    Ok(response)
+}
+
 /// Create MCX Single Analysis Response from processed data (matching NSE API structure)
 pub fn create_single_analysis_response(
     symbol: String,
