@@ -3,8 +3,8 @@ import { db, DB_KEYS } from '@/app/lib/db';
 
 // For static export, we need to use the full API URL
 const API_MCX_BASE_URL = process.env.NODE_ENV === 'development' 
-  ? 'http://localhost:3001'
-  : process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+  ? 'http://localhost:3002'
+  : process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3002';
 
 const api = axios.create({
   baseURL: API_MCX_BASE_URL,
