@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { db, DB_KEYS } from '@/app/lib/db';
+import { McxApiResponse, McxBatchAnalysisResponse, McxFutureQuoteResponse, McxFutureSymbolsResponse, McxHistoricalDataResponse, McxOptionChainResponse, McxOptionQuoteResponse, McxTickersResponse } from '@/app/types/api_mcx_type';
 
 // For static export, we need to use the full API URL
 const API_MCX_BASE_URL = process.env.NODE_ENV === 'development' 
@@ -11,64 +12,7 @@ const api = axios.create({
   timeout: 120000,
 });
 
-// MCX API Response Types
-export interface McxApiResponse<T> {
-  success: boolean;
-  data?: T;
-  error?: string;
-  fromCache?: boolean;
-  cachedAt?: string;
-  lastUpdated?: number;
-}
 
-export interface McxTickersResponse {
-  InstrumentName: string;
-  Symbols: Array<{
-    ExpiryDates: string[];
-    SymbolValue: string;
-  }>;
-}
-
-export interface McxFutureSymbolsResponse {
-  InstrumentName: string;
-  Products: Array<{
-    ExpiryDates: string[];
-    Product: string;
-  }>;
-}
-
-export interface McxOptionChainResponse {
-  // Define based on actual API response structure
-  [key: string]: any;
-}
-
-export interface McxFutureQuoteResponse {
-  // Define based on actual API response structure
-  [key: string]: any;
-}
-
-export interface McxOptionQuoteResponse {
-  // Define based on actual API response structure
-  [key: string]: any;
-}
-
-export interface McxBatchAnalysisResponse {
-  // Define based on actual API response structure
-  [key: string]: any;
-}
-
-export interface McxHistoricalDataResponse {
-  // Define based on actual API response structure
-  [key: string]: any;
-}
-
-// Data with age interface for MCX
-export interface McxDataWithAge<T> {
-  data: T;
-  age: string;
-  lastUpdated: number;
-  fromCache: boolean;
-}
 
 // Enhanced MCX API client with database integration
 export const mcxApiClient = {

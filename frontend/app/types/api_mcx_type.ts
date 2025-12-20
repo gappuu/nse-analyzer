@@ -1,0 +1,117 @@
+// MCX API Response Types
+export interface McxApiResponse<T> {
+  success: boolean;
+  data?: T;
+  error?: string;
+  fromCache?: boolean;
+  cachedAt?: string;
+  lastUpdated?: number;
+}
+
+export interface McxTickersResponse {
+  InstrumentName: string;
+  Symbols: Array<{
+    ExpiryDates: string[];
+    SymbolValue: string;
+  }>;
+}
+
+export interface McxFutureSymbolsResponse {
+  InstrumentName: string;
+  Products: Array<{
+    ExpiryDates: string[];
+    Product: string;
+  }>;
+}
+
+export interface McxOptionChainResponse {
+  symbol: string;
+    timestamp: string;
+    underlying_value: number;
+    spread: number;
+    days_to_expiry: number;
+    ce_oi: number;
+    pe_oi: number;
+    processed_data: ProcessedOptionData[];
+    alerts?: RulesOutput;
+  }
+
+  export interface ProcessedOptionData {
+    expiryDates?: string;
+    strikePrice?: number;
+    CE?: ProcessedOptionDetail;
+    PE?: ProcessedOptionDetail;
+    days_to_expiry: number;
+  }
+
+  export interface ProcessedOptionDetail {
+  strikePrice?: number;
+  underlyingValue?: number;
+  openInterest?: number;
+  changeinOpenInterest?: number;
+  lastPrice?: number;
+  change?: number;
+  pchange?: number;
+  pchangeinOpenInterest?: number;
+  the_money: string;
+  tambu?: string;
+  time_val: number;
+  days_to_expiry: number;
+  oiRank?: number;
+}
+
+export interface RulesOutput {
+  symbol: string;
+  timestamp: string;
+  underlying_value: number;
+  alerts: Alert[];
+}
+
+
+export interface Alert {
+  symbol: string;
+  strike_price: number;
+  expiry_date: string;
+  option_type: string;
+  alert_type: string;
+  description: string;
+  spread: number;
+  values: AlertValues;
+}
+
+export interface AlertValues {
+  pchange_in_oi?: number;
+  last_price?: number;
+  open_interest?: number;
+  the_money?: string;
+  time_val: number;
+  days_to_expiry: number;
+}
+
+export interface McxFutureQuoteResponse {
+  // Define based on actual API response structure
+  [key: string]: any;
+}
+
+export interface McxOptionQuoteResponse {
+  // Define based on actual API response structure
+  [key: string]: any;
+}
+
+export interface McxBatchAnalysisResponse {
+  // Define based on actual API response structure
+  [key: string]: any;
+}
+
+export interface McxHistoricalDataResponse {
+  // Define based on actual API response structure
+  [key: string]: any;
+}
+
+// Data with age interface for MCX
+export interface McxDataWithAge<T> {
+  data: T;
+  age: string;
+  lastUpdated: number;
+  fromCache: boolean;
+}
