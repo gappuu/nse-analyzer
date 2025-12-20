@@ -25,7 +25,7 @@ import {
   formatPercentage 
 } from '@/app/lib/api_nse';
 import { db } from '@/app/lib/db';
-import { BatchAnalysisResponse, RulesOutput, Alert, DataWithAge } from '@/app/types/api';
+import { BatchAnalysisResponse, RulesOutput, Alert, DataWithAge } from '@/app/types/api_nse_type';
 
 export default function BatchAnalysisPage() {
   const [batchData, setBatchData] = useState<DataWithAge<BatchAnalysisResponse> | null>(null);

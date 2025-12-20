@@ -24,7 +24,7 @@ import {
   getToday 
 } from '@/app/lib/api_nse';
 import { db } from '@/app/lib/db';
-import { ContractInfoResponse, SingleAnalysisResponse, DataWithAge, FuturesAnalysis, HistoricalDataPoint } from '@/app/types/api';
+import { ContractInfoResponse, SingleAnalysisResponse, DataWithAge, FuturesAnalysis, HistoricalDataPoint } from '@/app/types/api_nse_type';
 import HistoricalDataModal from '@/app/components/HistoricalDataModal';
 
 // Separate component that uses useSearchParams - wrapped in Suspense

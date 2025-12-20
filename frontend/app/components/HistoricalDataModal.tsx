@@ -11,7 +11,7 @@ import {
   Tooltip, 
   ResponsiveContainer 
 } from 'recharts';
-import { HistoricalDataPoint } from '@/app/types/api';
+import { HistoricalDataPoint } from '@/app/types/api_nse_type';
 
 interface HistoricalDataModalProps {
   isOpen: boolean;

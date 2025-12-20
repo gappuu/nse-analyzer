@@ -6,7 +6,7 @@ import {
   SingleAnalysisResponse,
   BatchAnalysisResponse,
   FuturesDataResponse,
-} from '@/app/types/api';
+} from '@/app/types/api_nse_type';
 import { db, DB_KEYS } from '@/app/lib/db';
 
 // For static export, we need to use the full API URL

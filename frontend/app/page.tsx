@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { apiClient, handleApiError } from '@/app/lib/api_nse';
 import { db } from '@/app/lib/db';
-import { SecurityInfo, SecurityListResponse, DataWithAge } from '@/app/types/api';
+import { SecurityInfo, SecurityListResponse, DataWithAge } from '@/app/types/api_nse_type';
 
 export default function HomePage() {
   const [securitiesData, setSecuritiesData] = useState<DataWithAge<SecurityListResponse> | null>(null);
