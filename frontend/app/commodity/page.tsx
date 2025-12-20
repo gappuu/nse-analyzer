@@ -20,78 +20,27 @@ import {
   mcxApiClient, 
   handleMcxApiError, 
   getMcxCommodityIcon,
-  McxDataWithAge,
-  McxTickersResponse,
-  McxFutureSymbolsResponse
 } from '@/app/lib/api_mcx';
 import { 
   getAlertBadgeClass, 
   formatCurrency, 
   getMoneyStatusColor, 
-  get20DaysAgo, 
-  getToday 
+  // get20DaysAgo, 
+  // getToday 
 } from '@/app/lib/api_nse';
 import { db } from '@/app/lib/db';
-
-// MCX Option Chain Response Types (same structure as NSE)
-export interface McxOptionChainResponse {
-  underlying_value: number;
-  timestamp: string;
-  spread: number;
-  days_to_expiry: number;
-  ce_oi: number;
-  pe_oi: number;
-  alerts?: {
-    alerts: McxAlert[];
-  };
-  processed_data: McxOptionData[];
-}
-
-export interface McxOptionData {
-  strikePrice: number;
-  CE?: McxOptionDetails;
-  PE?: McxOptionDetails;
-}
-
-export interface McxOptionDetails {
-  the_money: string;
-  lastPrice: number;
-  pchange: number;
-  openInterest: number;
-  pchangeinOpenInterest: number;
-  oiRank?: number;
-  tambu?: string;
-}
-
-export interface McxAlert {
-  alert_type: string;
-  description: string;
-  option_type: string;
-  strike_price: number;
-  expiry_date: string;
-  values: {
-    time_val: number;
-    the_money: string;
-    last_price?: number;
-    pchange_in_oi?: number;
-    [key: string]: any;
-  };
-}
-
-export interface McxFutureQuote {
-  action: string;
-  color: string;
-  underlyingValue: number;
-  timestamp: string;
-  lastPrice: number;
-  openInterest: number;
-  changeinOpenInterest: number;
-}
-
-export interface CombinedCommodityData {
-  optionExpiries: string[];
-  futureExpiries: string[];
-}
+import {
+  McxDataWithAge,
+  // McxTickersResponse,
+  // McxFutureSymbolsResponse,
+  McxOptionChainResponse,
+  // McxFutureQuoteResponse,
+  McxFutureAnalysis,
+  CombinedCommodityData,
+  // ProcessedOptionData,
+  // ProcessedOptionDetail,
+  // Alert
+} from '@/app/types/api_mcx_type';
 
 // Separate component that uses useSearchParams - wrapped in Suspense
 function CommodityPageContent() {
@@ -102,7 +51,7 @@ function CommodityPageContent() {
   const [selectedExpiry, setSelectedExpiry] = useState<string | null>(null);
   const [selectedType, setSelectedType] = useState<'options' | 'futures'>('options');
   const [analysisData, setAnalysisData] = useState<McxDataWithAge<McxOptionChainResponse> | null>(null);
-  const [futuresQuote, setFuturesQuote] = useState<McxFutureQuote | null>(null);
+  const [futuresQuote, setFuturesQuote] = useState<McxFutureAnalysis | null>(null);
   const [loading, setLoading] = useState(true);
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [fetching, setFetching] = useState(false);
@@ -406,6 +355,10 @@ function CommodityPageContent() {
     }
   };
 
+  const parseExpiry = (expiry: string): number => {
+    return new Date(expiry.replace(/-/g, ' ')).getTime();
+  };
+
   if (!symbol) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -530,34 +483,41 @@ function CommodityPageContent() {
                   <h3 className="text-lg font-medium text-gray-200">Options Expiries ({commodityData.data.optionExpiries.length})</h3>
                 </div>
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
-                  {commodityData.data.optionExpiries.map((expiry) => (
-                    <button
-                      key={`option-${expiry}`}
-                      onClick={() => handleExpirySelect(expiry, 'options')}
-                      disabled={analysisLoading || analysisFetching}
-                      className={`p-3 rounded-lg font-medium transition-all ${
-                        selectedExpiry === expiry && selectedType === 'options'
-                          ? 'bg-nse-accent text-white shadow-lg'
-                          : 'bg-slate-700 text-gray-300 hover:bg-slate-600'
-                      } ${(analysisLoading || analysisFetching) ? 'opacity-50 cursor-not-allowed' : ''}`}
-                    >
-                      <div className="text-xs text-gray-400 mb-1">OPT</div>
-                      {expiry}
-                    </button>
-                  ))}
+                  {[...commodityData.data.optionExpiries]
+                    .sort((a, b) => parseExpiry(a) - parseExpiry(b))
+                    .map((expiry) => (
+                      <button
+                        key={`option-${expiry}`}
+                        onClick={() => handleExpirySelect(expiry, 'options')}
+                        disabled={analysisLoading || analysisFetching}
+                        className={`p-3 rounded-lg font-medium transition-all ${
+                          selectedExpiry === expiry && selectedType === 'options'
+                            ? 'bg-nse-accent text-white shadow-lg'
+                            : 'bg-slate-700 text-gray-300 hover:bg-slate-600'
+                        } ${(analysisLoading || analysisFetching) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      >
+                        <div className="text-xs text-gray-400 mb-1">OPT</div>
+                        {expiry}
+                      </button>
+                    ))}
                 </div>
               </div>
             )}
 
             {/* Futures Expiries */}
             {commodityData.data.futureExpiries.length > 0 && (
-              <div>
-                <div className="flex items-center gap-3 mb-3">
-                  <BarChart className="w-4 h-4 text-nse-accent" />
-                  <h3 className="text-lg font-medium text-gray-200">Futures Expiries ({commodityData.data.futureExpiries.length})</h3>
-                </div>
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
-                  {commodityData.data.futureExpiries.map((expiry) => (
+            <div>
+              <div className="flex items-center gap-3 mb-3">
+                <BarChart className="w-4 h-4 text-nse-accent" />
+                <h3 className="text-lg font-medium text-gray-200">
+                  Futures Expiries ({commodityData.data.futureExpiries.length})
+                </h3>
+              </div>
+
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
+                {[...commodityData.data.futureExpiries]
+                  .sort((a, b) => parseExpiry(a) - parseExpiry(b))
+                  .map((expiry) => (
                     <button
                       key={`future-${expiry}`}
                       onClick={() => handleExpirySelect(expiry, 'futures')}
@@ -572,9 +532,9 @@ function CommodityPageContent() {
                       {expiry}
                     </button>
                   ))}
-                </div>
               </div>
-            )}
+            </div>
+          )}
           </section>
         )}
 
@@ -638,7 +598,7 @@ function CommodityPageContent() {
                           <span className="text-sm text-gray-400">Underlying Value</span>
                         </div>
                         <p className="text-2xl font-bold text-gray-100">
-                          {formatCurrency(analysisData.data.underlying_value || 0)}
+                          {formatCurrency(analysisData.data.underlyingValue)}
                         </p>
                         <p className="text-sm text-gray-500 mt-1">as of {analysisData.data.timestamp}</p>
                       </div>
@@ -680,7 +640,7 @@ function CommodityPageContent() {
                     </div>
 
                     {/* Alerts */}
-                    {analysisData.data.alerts && analysisData.data.alerts.alerts.length > 0 && (
+                    {analysisData.data.alerts && analysisData.data.alerts.alerts && analysisData.data.alerts.alerts.length > 0 && (
                       <div className="card-glow rounded-lg p-6">
                         <div className="flex items-center gap-3 mb-4">
                           <AlertCircle className="w-5 h-5 text-nse-warning" />
@@ -704,10 +664,10 @@ function CommodityPageContent() {
                                     {alert.option_type}
                                   </span>
                                   <span className="text-gray-400">
-                                    Strike: ₹{alert.strike_price} 
+                                    Strike: ₹{alert.strikePrice} 
                                   </span>
                                   <span>
-                                    Expiry: {alert.expiry_date}
+                                    Expiry: {alert.expiryDates}
                                   </span>
                                 </div>
                               </div>
@@ -723,19 +683,19 @@ function CommodityPageContent() {
                                   <span className="text-gray-500">The Money:</span>
                                   <p className="text-gray-200 font-medium">{alert.values.the_money}</p>
                                 </div>
-                                {alert.values.last_price && (
+                                {alert.values.lastPrice && (
                                   <div>
                                     <span className="text-gray-500">Last Price:</span>
-                                    <p className="text-gray-200 font-medium">₹{alert.values.last_price.toFixed(2)}</p>
+                                    <p className="text-gray-200 font-medium">₹{alert.values.lastPrice.toFixed(2)}</p>
                                   </div>
                                 )}
-                                {alert.values.pchange_in_oi && (
+                                {alert.values.pchangeinOpenInterest && (
                                   <div>
                                     <span className="text-gray-500">OI Change:</span>
                                     <p className={`font-medium ${
-                                      alert.values.pchange_in_oi > 0 ? 'text-green-400' : 'text-red-400'
+                                      alert.values.pchangeinOpenInterest > 0 ? 'text-green-400' : 'text-red-400'
                                     }`}>
-                                      {alert.values.pchange_in_oi.toFixed(2)}%
+                                      {alert.values.pchangeinOpenInterest.toFixed(2)}%
                                     </p>
                                   </div>
                                 )}
@@ -759,7 +719,7 @@ function CommodityPageContent() {
                                   {symbol}
                                 </div>
                                 <div className="font-bold">
-                                  ₹ {analysisData.data.underlying_value || 0}
+                                  ₹ {analysisData.data.underlyingValue.toLocaleString("en-IN")}
                                 </div>
                                 <div className="text-l"><sub>{analysisData.data.timestamp}: {getDataTimestampAge(analysisData.data.timestamp)}</sub></div>
                               </td>
@@ -933,7 +893,7 @@ function CommodityPageContent() {
                     </div>
 
                     {/* No Alerts Message */}
-                    {(!analysisData.data.alerts || analysisData.data.alerts.alerts.length === 0) && (
+                    {(!analysisData.data.alerts || !analysisData.data.alerts.alerts || analysisData.data.alerts.alerts.length === 0) && (
                       <div className="card-glow rounded-lg p-8 text-center">
                         <AlertCircle className="w-12 h-12 text-gray-500 mx-auto mb-4" />
                         <h3 className="text-lg font-semibold text-gray-300 mb-2">No Alerts Found</h3>

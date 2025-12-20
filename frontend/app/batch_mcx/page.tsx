@@ -17,52 +17,23 @@ import {
   RefreshCw,
   Database,
   Eye,
-  TrendingUp
+  // TrendingUp
 } from 'lucide-react';
 import { 
   mcxApiClient, 
   handleMcxApiError,
-  McxDataWithAge
 } from '@/app/lib/api_mcx';
 import { 
   getAlertBadgeClass, 
   formatPercentage 
 } from '@/app/lib/api_nse';
 import { db } from '@/app/lib/db';
-
-// MCX Batch Analysis Response Types (same structure as NSE)
-export interface McxBatchAnalysisResponse {
-  summary: {
-    total_securities: number;
-    successful: number;
-    failed: number;
-    securities_with_alerts: number;
-    processing_time_ms: number;
-  };
-  rules_output: McxRulesOutput[];
-}
-
-export interface McxRulesOutput {
-  symbol: string;
-  underlying_value: number;
-  timestamp: string;
-  alerts: McxAlert[];
-}
-
-export interface McxAlert {
-  alert_type: string;
-  description: string;
-  option_type: string;
-  strike_price: number;
-  expiry_date: string;
-  values: {
-    time_val: number;
-    the_money: string;
-    last_price?: number;
-    pchange_in_oi?: number;
-    [key: string]: any;
-  };
-}
+import {
+  McxDataWithAge,
+  McxBatchAnalysisResponse,
+  RulesOutput,
+  Alert
+} from '@/app/types/api_mcx_type';
 
 export default function McxBatchAnalysisPage() {
   const [batchData, setBatchData] = useState<McxDataWithAge<McxBatchAnalysisResponse> | null>(null);
@@ -503,7 +474,7 @@ export default function McxBatchAnalysisPage() {
 }
 
 // MCX Commodity Result Card Component - Updated to use query parameters
-function McxCommodityResultCard({ result }: { result: McxRulesOutput }) {
+function McxCommodityResultCard({ result }: { result: RulesOutput }) {
   return (
     <div className="card-glow rounded-lg overflow-hidden">
       <div className="p-6 border-b border-gray-700/50">
@@ -519,8 +490,9 @@ function McxCommodityResultCard({ result }: { result: McxRulesOutput }) {
               </span>
             </div>
             <div className="flex items-center gap-4 text-sm text-gray-400">
-              <span>Underlying: ₹{result.underlying_value?.toFixed(2)}</span>
+              <span>Underlying: ₹{result.underlyingValue.toFixed(2)}</span>
               <span>•</span>
+              
               <span>Updated: {new Date(result.timestamp).toLocaleString()}</span>
             </div>
           </div>
@@ -529,7 +501,7 @@ function McxCommodityResultCard({ result }: { result: McxRulesOutput }) {
             href={`/commodity/?symbol=${encodeURIComponent(result.symbol)}`}
             className="btn-primary text-sm"
           >
-            View MCX Details
+            View Details
           </Link>
         </div>
       </div>
@@ -546,7 +518,7 @@ function McxCommodityResultCard({ result }: { result: McxRulesOutput }) {
 }
 
 // MCX Alert Card Component
-function McxAlertCard({ alert }: { alert: McxAlert }) {
+function McxAlertCard({ alert }: { alert: Alert }) {
   return (
     <div className="bg-slate-800/50 rounded-lg p-4 border border-gray-700/50">
       <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
@@ -562,10 +534,10 @@ function McxAlertCard({ alert }: { alert: McxAlert }) {
               {alert.option_type}
             </span>
             <span className="text-gray-400">
-              Strike: ₹{alert.strike_price}
+              Strike: ₹{alert.strikePrice}
             </span>
             <span className="text-gray-400">
-              Expiry: {alert.expiry_date}
+              Expiry: {alert.expiryDates}
             </span>
           </div>
           
@@ -581,19 +553,19 @@ function McxAlertCard({ alert }: { alert: McxAlert }) {
             <span className="text-gray-500">Position:</span>
             <p className="text-gray-200 font-medium">{alert.values.the_money}</p>
           </div>
-          {alert.values.last_price && (
+          {alert.values.lastPrice && (
             <div>
               <span className="text-gray-500">Last Price:</span>
-              <p className="text-gray-200 font-medium">₹{alert.values.last_price.toFixed(2)}</p>
+              <p className="text-gray-200 font-medium">₹{alert.values.lastPrice.toFixed(2)}</p>
             </div>
           )}
-          {alert.values.pchange_in_oi && (
+          {alert.values.pchangeinOpenInterest && (
             <div>
               <span className="text-gray-500">OI Change:</span>
               <p className={`font-medium ${
-                alert.values.pchange_in_oi > 0 ? 'text-green-400' : 'text-red-400'
+                alert.values.pchangeinOpenInterest > 0 ? 'text-green-400' : 'text-red-400'
               }`}>
-                {formatPercentage(alert.values.pchange_in_oi)}
+                {formatPercentage(alert.values.pchangeinOpenInterest)}
               </p>
             </div>
           )}

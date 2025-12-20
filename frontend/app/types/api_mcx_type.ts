@@ -26,25 +26,25 @@ export interface McxFutureSymbolsResponse {
 
 export interface McxOptionChainResponse {
   symbol: string;
-    timestamp: string;
-    underlying_value: number;
-    spread: number;
-    days_to_expiry: number;
-    ce_oi: number;
-    pe_oi: number;
-    processed_data: ProcessedOptionData[];
-    alerts?: RulesOutput;
-  }
+  timestamp: string;
+  underlyingValue: number; // camelCase as per API
+  spread: number;
+  days_to_expiry: number;
+  ce_oi: number;
+  pe_oi: number;
+  processed_data: ProcessedOptionData[];
+  alerts?: RulesOutput;
+}
 
-  export interface ProcessedOptionData {
-    expiryDates?: string;
-    strikePrice?: number;
-    CE?: ProcessedOptionDetail;
-    PE?: ProcessedOptionDetail;
-    days_to_expiry: number;
-  }
+export interface ProcessedOptionData {
+  expiryDates?: string;
+  strikePrice?: number;
+  CE?: ProcessedOptionDetail;
+  PE?: ProcessedOptionDetail;
+  days_to_expiry: number;
+}
 
-  export interface ProcessedOptionDetail {
+export interface ProcessedOptionDetail {
   strikePrice?: number;
   underlyingValue?: number;
   openInterest?: number;
@@ -63,15 +63,14 @@ export interface McxOptionChainResponse {
 export interface RulesOutput {
   symbol: string;
   timestamp: string;
-  underlying_value: number;
+  underlyingValue: number; // camelCase as per API
   alerts: Alert[];
 }
 
-
 export interface Alert {
   symbol: string;
-  strike_price: number;
-  expiry_date: string;
+  strikePrice: number;
+  expiryDates: string;
   option_type: string;
   alert_type: string;
   description: string;
@@ -80,9 +79,9 @@ export interface Alert {
 }
 
 export interface AlertValues {
-  pchange_in_oi?: number;
-  last_price?: number;
-  open_interest?: number;
+  pchangeinOpenInterest?: number;
+  lastPrice?: number;
+  openInterest?: number;
   the_money?: string;
   time_val: number;
   days_to_expiry: number;
@@ -102,24 +101,71 @@ export interface BatchAnalysisResponse {
   rules_output: RulesOutput[];
 }
 
+// MCX Futures Quote Response Structure
 export interface McxFutureQuoteResponse {
-  // Define based on actual API response structure
-  [key: string]: any;
+  symbol: string;
+  timestamp: string;
+  data: Array<{
+    symbol: string;
+    underlyingValue: number;
+    lastPrice: number;
+    change: number;
+    pchange: number;
+    openInterest: number;
+    changeinOpenInterest: number;
+    pchangeinOpenInterest: number;
+  }>;
 }
 
+// MCX Future Analysis Helper Interface
+export interface McxFutureAnalysis {
+  action: string;
+  color: string;
+  underlyingValue: number;
+  timestamp: string;
+  lastPrice: number;
+  openInterest: number;
+  changeinOpenInterest: number;
+}
+
+// MCX Option Quote Response Structure  
 export interface McxOptionQuoteResponse {
-  // Define based on actual API response structure
-  [key: string]: any;
+  symbol: string;
+  timestamp: string;
+  data: Array<{
+    symbol: string;
+    strikePrice: number;
+    optionType: string;
+    underlyingValue: number;
+    lastPrice: number;
+    change: number;
+    pchange: number;
+    openInterest: number;
+    changeinOpenInterest: number;
+    pchangeinOpenInterest: number;
+  }>;
 }
 
+// MCX Batch Analysis Response Structure
 export interface McxBatchAnalysisResponse {
-  // Define based on actual API response structure
-  [key: string]: any;
+  summary: BatchSummary;
+  rules_output: RulesOutput[];
 }
 
+// MCX Historical Data Response Structure
 export interface McxHistoricalDataResponse {
-  // Define based on actual API response structure
-  [key: string]: any;
+  symbol: string;
+  instrumentType: string;
+  expiry: string;
+  data: Array<{
+    FH_TIMESTAMP: string;
+    FH_UNDERLYING_VALUE: number;
+    FH_OPEN_INT: number;
+    FH_CHANGE_IN_OI: number;
+    FH_SETTLE_PRICE: number;
+    FH_STRIKE_PRICE?: number;
+    FH_OPTION_TYPE?: string;
+  }>;
 }
 
 // Data with age interface for MCX
@@ -128,4 +174,10 @@ export interface McxDataWithAge<T> {
   age: string;
   lastUpdated: number;
   fromCache: boolean;
+}
+
+// Combined commodity data for UI
+export interface CombinedCommodityData {
+  optionExpiries: string[];
+  futureExpiries: string[];
 }

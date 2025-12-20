@@ -1,6 +1,16 @@
 import axios from 'axios';
 import { db, DB_KEYS } from '@/app/lib/db';
-import { McxApiResponse, McxBatchAnalysisResponse, McxFutureQuoteResponse, McxFutureSymbolsResponse, McxHistoricalDataResponse, McxOptionChainResponse, McxOptionQuoteResponse, McxTickersResponse } from '@/app/types/api_mcx_type';
+import {
+  McxApiResponse,
+  McxTickersResponse,
+  McxFutureSymbolsResponse,
+  McxOptionChainResponse,
+  McxFutureQuoteResponse,
+  McxOptionQuoteResponse,
+  McxBatchAnalysisResponse,
+  McxHistoricalDataResponse,
+  // McxDataWithAge
+} from '@/app/types/api_mcx_type';
 
 // For static export, we need to use the full API URL
 const API_MCX_BASE_URL = process.env.NODE_ENV === 'development' 
@@ -11,8 +21,6 @@ const api = axios.create({
   baseURL: API_MCX_BASE_URL,
   timeout: 120000,
 });
-
-
 
 // Enhanced MCX API client with database integration
 export const mcxApiClient = {

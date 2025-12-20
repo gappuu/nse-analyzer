@@ -16,9 +16,10 @@ import {
   Coins
 } from 'lucide-react';
 import { apiClient, handleApiError } from '@/app/lib/api_nse';
-import { mcxApiClient, handleMcxApiError, getMcxCommodityIcon, getMcxCommodityLetters, McxDataWithAge, McxTickersResponse, McxFutureSymbolsResponse } from '@/app/lib/api_mcx';
+import { mcxApiClient, handleMcxApiError, getMcxCommodityIcon, getMcxCommodityLetters } from '@/app/lib/api_mcx';
 import { db } from '@/app/lib/db';
 import { SecurityInfo, SecurityListResponse, DataWithAge } from '@/app/types/api_nse_type';
+import { McxDataWithAge, McxTickersResponse, McxFutureSymbolsResponse } from '@/app/types/api_mcx_type';
 
 type TabType = 'nse' | 'mcx';
 
@@ -238,7 +239,7 @@ export default function HomePage() {
   ) : [];
 
   const isLoading = activeTab === 'nse' ? nseLoading : mcxLoading;
-  const isFetching = activeTab === 'nse' ? nseFetching : mcxFetching;
+  // const isFetching = activeTab === 'nse' ? nseFetching : mcxFetching;
   const error = activeTab === 'nse' ? nseError : mcxError;
   const hasData = activeTab === 'nse' ? !!securitiesData : !!mcxData;
 
@@ -626,7 +627,7 @@ function NseContent({
 // MCX Content Component
 function McxContent({ 
   filteredCommodities,
-  searchTerm
+  // searchTerm
 }: {
   filteredCommodities: Array<{name: string, type: 'option' | 'future', expiryDates: string[]}>;
   searchTerm: string;
