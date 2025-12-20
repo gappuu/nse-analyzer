@@ -2,6 +2,7 @@ use super::models::{ OptionData as McxOptionData};
 use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Local, NaiveDate};
 use anyhow::{Result, anyhow};
+use serde_json::Value;
 
 /// Convert MCX timestamp format "/Date(1766159098000)/" to readable format
 pub fn convert_mcx_timestamp(mcx_timestamp: &str) -> String {
@@ -630,3 +631,79 @@ pub fn create_single_analysis_response(
         alerts,
     }
 }
+
+// in mcx_api_server::get_future_quote enhance the quote data json
+pub fn enrich_mcx_future_quote(quote: &mut Value) {
+    // ---- Fix Summary.AsOn ----
+    if let Some(summary) = quote
+        .get_mut("d")
+        .and_then(|d| d.get_mut("Summary"))
+        .and_then(|s| s.as_object_mut())
+    {
+        if let Some(as_on) = summary.get("AsOn").and_then(|v| v.as_str()) {
+            summary.insert(
+                "AsOn".to_string(),
+                Value::String(convert_mcx_timestamp(as_on)),
+            );
+        }
+    }
+
+    // ---- Enrich Data[] ----
+    if let Some(data_array) = quote
+        .get_mut("d")
+        .and_then(|d| d.get_mut("Data"))
+        .and_then(|v| v.as_array_mut())
+    {
+        for item in data_array {
+            let obj = match item.as_object_mut() {
+                Some(o) => o,
+                None => continue,
+            };
+
+            let pchange = obj
+                .get("PercentChange")
+                .and_then(|v| v.as_f64());
+
+            let change_in_oi = obj
+                .get("ChangeInOpenInterest")
+                .and_then(|v| v.as_f64());
+
+            let open_interest = obj
+                .get("OpenInterest")
+                .and_then(|v| v.as_f64());
+
+            let pchangein_oi = match (change_in_oi, open_interest) {
+                (Some(change), Some(oi)) if change + oi != 0.0 =>
+                    Some(change / (change + oi)),
+                _ => None,
+            };
+
+            if let (Some(pchange), Some(poi)) = (pchange, pchangein_oi) {
+                let action = if pchange > 0.0 && poi > 0.0 {
+                    "Long Buildup"
+                } else if pchange > 0.0 && poi < 0.0 {
+                    "Short Covering"
+                } else if pchange < 0.0 && poi > 0.0 {
+                    "Short Buildup"
+                } else if pchange < 0.0 && poi < 0.0 {
+                    "Long Covering"
+                } else {
+                    "Neutral"
+                };
+
+                if let Some(num) = serde_json::Number::from_f64(poi) {
+                    obj.insert(
+                        "pchangeinOpenInterest".to_string(),
+                        Value::Number(num),
+                    );
+                }
+
+                obj.insert(
+                    "action".to_string(),
+                    Value::String(action.to_string()),
+                );
+            }
+        }
+    }
+}
+

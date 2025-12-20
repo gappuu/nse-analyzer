@@ -480,20 +480,8 @@ async fn get_future_quote(
     match app_state.client.fetch_future_quote(&query.commodity, &query.expiry).await {
         Ok(mut quote_data) => {
 
-            if let Some(summary) = quote_data
-                .get_mut("d")
-                .and_then(|d| d.get_mut("Summary"))
-                .and_then(|s| s.as_object_mut())
-            {
-                if let Some(as_on) = summary.get("AsOn").and_then(|v| v.as_str()) {
-                    summary.insert(
-                        "AsOn".to_string(),
-                        serde_json::Value::String(
-                            processor::convert_mcx_timestamp(as_on)
-                        ),
-                    );
-                }
-            }
+             processor::enrich_mcx_future_quote(&mut quote_data);
+             
             // Update cache
             {
                 let mut cache = app_state.cache.write().await;
