@@ -84,7 +84,7 @@ pub const REFERER_BHAVCOPY: &str = "https://www.mcxindia.com/market-data/bhavcop
 // -----------------------------------------------
 // REGEX PATTERNS FOR SCRAPING
 // -----------------------------------------------
-pub const VTICK_PATTERN: &str = r"var\s+vTick\s*=\s*(\[.*?\]);";
+// pub const VTICK_PATTERN: &str = r"var\s+vTick\s*=\s*(\[.*?\]);";
 
 // -----------------------------------------------
 // FUTURE SYMBOLS API QUERY PARAMETERS
