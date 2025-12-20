@@ -495,6 +495,38 @@ pub fn get_max_oi(opt: &ProcessedMcxOptionData) -> f64 {
     ce_oi.max(pe_oi)
 }
 
+/// Process MCX tickers data - group by SymbolValue and collect expiry dates
+pub fn process_mcx_tickers(tickers: Vec<super::models::Ticker>) -> serde_json::Value {
+    // Group by SymbolValue and collect expiry dates
+    let mut symbols: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+    
+    for ticker in tickers {
+        let formatted_date = convert_mcx_expiry_format(&ticker.expiry_date);
+        symbols.entry(ticker.symbol_value.clone())
+            .or_insert_with(Vec::new)
+            .push(formatted_date);
+    }
+    
+    // Sort expiry dates for each symbol and remove duplicates
+    for dates in symbols.values_mut() {
+        dates.sort();
+        dates.dedup();
+    }
+    
+    // Create the response structure
+    serde_json::json!({
+        "InstrumentName": "OPTFUT",
+        "Symbols": symbols.into_iter()
+            .map(|(symbol, dates)| {
+                serde_json::json!({
+                    "SymbolValue": symbol,
+                    "ExpiryDates": dates
+                })
+            })
+            .collect::<Vec<_>>()
+    })
+}
+
 /// Convert MCX timestamp to date only format (without time)
 pub fn convert_mcx_timestamp_to_date(mcx_timestamp: &str) -> String {
     // Extract epoch from "/Date(1766159098000)/" format

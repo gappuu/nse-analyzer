@@ -135,7 +135,7 @@ async fn health() -> &'static str {
 }
 
 /// GET /api/mcx/tickers - Get all available MCX tickers
-async fn get_ticker_list(State(app_state): State<AppState>) -> Result<Json<ApiResponse<TickerListResponse>>, StatusCode> {
+async fn get_ticker_list(State(app_state): State<AppState>) -> Result<Json<ApiResponse<serde_json::Value>>, StatusCode> {
     let start_time = Instant::now();
 
     // Check cache first
@@ -143,14 +143,10 @@ async fn get_ticker_list(State(app_state): State<AppState>) -> Result<Json<ApiRe
         let cache = app_state.cache.read().await;
         if let Some((tickers, cached_at)) = &cache.ticker_list {
             if cached_at.elapsed() < CACHE_DURATION {
-                let unique_symbols = MCXClient::get_unique_symbols(tickers);
+                let processed_data = processor::process_mcx_tickers(tickers.clone());
                 return Ok(Json(ApiResponse {
                     success: true,
-                    data: Some(TickerListResponse {
-                        total_tickers: tickers.len(),
-                        unique_symbols: unique_symbols.clone(),
-                        tickers: tickers.clone(),
-                    }),
+                    data: Some(processed_data),
                     error: None,
                     processing_time_ms: Some(start_time.elapsed().as_millis() as u64),
                 }));
@@ -161,21 +157,16 @@ async fn get_ticker_list(State(app_state): State<AppState>) -> Result<Json<ApiRe
     // Fetch from web scraping
     match app_state.client.fetch_ticker_list().await {
         Ok(tickers) => {
-            let unique_symbols = MCXClient::get_unique_symbols(&tickers);
-            
             // Update cache
             {
                 let mut cache = app_state.cache.write().await;
                 cache.ticker_list = Some((tickers.clone(), Instant::now()));
             }
 
+            let processed_data = processor::process_mcx_tickers(tickers);
             Ok(Json(ApiResponse {
                 success: true,
-                data: Some(TickerListResponse {
-                    total_tickers: tickers.len(),
-                    unique_symbols,
-                    tickers,
-                }),
+                data: Some(processed_data),
                 error: None,
                 processing_time_ms: Some(start_time.elapsed().as_millis() as u64),
             }))
