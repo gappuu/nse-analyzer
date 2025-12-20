@@ -94,10 +94,11 @@ pub fn run_mcx_rules(
     if alerts.is_empty() {
         return None;
     }
-    
+    let converted_timestamp =super::processor::convert_mcx_timestamp(&timestamp);
+
     Some(McxRulesOutput {
         symbol,
-        timestamp,
+        timestamp : converted_timestamp,
         underlying_value,
         alerts,
     })
