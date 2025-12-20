@@ -23,7 +23,7 @@ import {
   handleApiError, 
   getAlertBadgeClass, 
   formatPercentage 
-} from '@/app/lib/api';
+} from '@/app/lib/api_nse';
 import { db } from '@/app/lib/db';
 import { BatchAnalysisResponse, RulesOutput, Alert, DataWithAge } from '@/app/types/api';
 

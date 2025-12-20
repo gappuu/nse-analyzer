@@ -13,7 +13,7 @@ import {
   Clock,
   Database
 } from 'lucide-react';
-import { apiClient, handleApiError } from '@/app/lib/api';
+import { apiClient, handleApiError } from '@/app/lib/api_nse';
 import { db } from '@/app/lib/db';
 import { SecurityInfo, SecurityListResponse, DataWithAge } from '@/app/types/api';
 
