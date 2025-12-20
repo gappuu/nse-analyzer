@@ -52,6 +52,7 @@ function CommodityPageContent() {
   const [selectedType, setSelectedType] = useState<'options' | 'futures'>('options');
   const [analysisData, setAnalysisData] = useState<McxDataWithAge<McxOptionChainResponse> | null>(null);
   const [futuresQuote, setFuturesQuote] = useState<McxFutureAnalysis | null>(null);
+  const [latestFuturesData, setLatestFuturesData] = useState<McxFutureAnalysis | null>(null);
   const [futuresData, setFuturesData] = useState<McxDataWithAge<McxFutureQuoteResponse> | null>(null);
   const [loading, setLoading] = useState(true);
   const [analysisLoading, setAnalysisLoading] = useState(false);
@@ -141,6 +142,7 @@ function CommodityPageContent() {
         if (response.data.d && response.data.d.Data && response.data.d.Data.length > 0) {
           const data = response.data.d.Data[0];
           const summary = response.data.d.Summary;
+          
           const {
             PercentChange: pchange,
             ChangeInOpenInterest: changeInOI,
@@ -180,13 +182,13 @@ function CommodityPageContent() {
             color = 'text-gray-400';
           }
           
-          const asOnTimestamp = convertMcxDate(summary.AsOn);
+          
           
           const futureAnalysis: McxFutureAnalysis = {
             action,
             color,
             underlyingValue: previousClose, // Use previous close as underlying value
-            timestamp: asOnTimestamp,
+            timestamp:summary.AsOn,
             lastPrice: previousClose + absoluteChange, // Current price
             openInterest,
             changeinOpenInterest: changeInOI,
@@ -194,7 +196,7 @@ function CommodityPageContent() {
             percentChange: pchange,
             absoluteChange,
             previousClose,
-            asOnTimestamp,
+      
             Productdesc,
             LifeTimeHigh,
             AveragePrice,
@@ -205,6 +207,15 @@ function CommodityPageContent() {
           };
           
           setFuturesQuote(futureAnalysis);
+          
+          // Store the raw response data for detailed view
+          const dataWithAge: McxDataWithAge<McxFutureQuoteResponse> = {
+            data: response.data,
+            age: response.lastUpdated ? db.getDataAge(response.lastUpdated) : 'just now',
+            lastUpdated: response.lastUpdated || Date.now(),
+            fromCache: response.fromCache || false
+          };
+          setFuturesData(dataWithAge);
         } else {
           console.error('Invalid futures data structure:', response.data);
           setFuturesQuote({
@@ -245,6 +256,76 @@ function CommodityPageContent() {
       setFuturesData(null);
     } finally {
       setFuturesLoading(false);
+    }
+  };
+
+  // Function to fetch latest futures data for header display
+  const fetchLatestFuturesData = async () => {
+    if (!symbol || !commodityData?.data.futureExpiries.length) return;
+    
+    try {
+      // Get the latest (first) futures expiry
+      const latestExpiry = commodityData.data.futureExpiries[0];
+      const formattedExpiry = formatExpiryForAPI(latestExpiry);
+      
+      const response = await mcxApiClient.getFutureQuote(symbol, formattedExpiry, false);
+      
+      if (response.success && response.data) {
+        if (response.data.d && response.data.d.Data && response.data.d.Data.length > 0) {
+          const data = response.data.d.Data[0];
+          const summary = response.data.d.Summary;
+          
+          const {
+            PercentChange: pchange,
+            ChangeInOpenInterest: changeInOI,
+            OpenInterest: openInterest,
+            PreviousClose: previousClose,
+            AbsoluteChange: absoluteChange,
+            ExpiryDate: expiryDate
+          } = data;
+          
+          // Calculate pchangeinOpenInterest
+          const pchangeinOpenInterest = changeInOI / (changeInOI + openInterest);
+          
+          let action = '';
+          let color = '';
+          
+          if (pchange > 0 && pchangeinOpenInterest > 0) {
+            action = 'Long Buildup';
+            color = 'text-green-400';
+          } else if (pchange > 0 && pchangeinOpenInterest < 0) {
+            action = 'Short Covering';
+            color = 'text-gray-300';
+          } else if (pchange < 0 && pchangeinOpenInterest > 0) {
+            action = 'Short Buildup';
+            color = 'text-red-400';
+          } else if (pchange < 0 && pchangeinOpenInterest < 0) {
+            action = 'Long Covering';
+            color = 'text-gray-300';
+          } else {
+            action = 'Neutral';
+            color = 'text-gray-400';
+          }
+          
+          const asOnTimestamp = convertMcxDate(summary.AsOn);
+          
+          setLatestFuturesData({
+            action,
+            color,
+            underlyingValue: previousClose,
+            timestamp: asOnTimestamp,
+            lastPrice: previousClose + absoluteChange,
+            openInterest,
+            changeinOpenInterest: changeInOI,
+            expiryDate,
+            percentChange: pchange,
+            absoluteChange,
+            previousClose
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching latest futures data:', error);
     }
   };
 
@@ -318,9 +399,9 @@ function CommodityPageContent() {
           }
           
           // Fetch latest futures data for header display
-          // if (combinedData.futureExpiries.length > 0) {
-          //   setTimeout(() => fetchLatestFuturesData(), 100);
-          // }
+          if (combinedData.futureExpiries.length > 0) {
+            setTimeout(() => fetchLatestFuturesData(), 100);
+          }
         } else {
           setError(tickersResponse.error || futureSymbolsResponse.error || 'Failed to load commodity data');
         }
@@ -801,17 +882,16 @@ function CommodityPageContent() {
                               <td>
                                 <div className="font-bold">
                                   FUTURES
-                                  {/* this needs to be sorted */}
-                                  {futuresQuote && (
-                                    <span className={`text-l`}>
-                                      {futuresQuote.action}
+                                  {latestFuturesData && (
+                                    <span className={`text-l ${latestFuturesData.color}`}>
+                                      {latestFuturesData.action}
                                     </span>
                                   )}
                                 </div>
                                 <div>
-                                  {futuresQuote && `₹ ${futuresQuote.lastPrice.toLocaleString("en-IN")}`}
+                                  {latestFuturesData && `₹ ${latestFuturesData.lastPrice.toLocaleString("en-IN")}`}
                                 </div>
-                                <div><sub>{futuresQuote?.expiryDate}: {getDataTimestampAge(futuresQuote?.timestamp)}</sub></div>
+                                <div><sub>{latestFuturesData?.expiryDate}: {getDataTimestampAge(latestFuturesData?.timestamp)}</sub></div>
                               </td>
 
                               <td className="px-6 py-4 text-right" colSpan={2}>
@@ -1034,10 +1114,12 @@ function CommodityPageContent() {
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                       <div className="card-glow rounded-lg p-6">
                         <div className="flex items-center gap-3 mb-2">
-                          <span className="text-sm text-gray-400">Lifetime High :{futuresQuote.LifeTimeHigh?.toFixed(2)}</span>
+                          <span className="text-sm text-gray-400">Previous Close</span>
                         </div>
-                          <span className="text-sm text-gray-400"> average price {futuresQuote.AveragePrice?.toFixed(2)}</span>
-                        <p className="text-sm text-gray-400">Lifetime Low {futuresQuote.LifeTimeLow?.toFixed(2)}</p>
+                        <p className="text-2xl font-bold text-gray-100">
+                          ₹{futuresQuote.previousClose?.toFixed(2) || 0}
+                        </p>
+                        <p className="text-sm text-gray-500 mt-1">as of {futuresQuote.timestamp}</p>
                       </div>
 
                       <div className="card-glow rounded-lg p-6">
@@ -1095,7 +1177,7 @@ function CommodityPageContent() {
                         <div className="text-center">
                           <p className="text-gray-400 text-sm">Data As On</p>
                           <p className="text-lg font-medium text-gray-100">
-                            {futuresQuote.asOnTimestamp}
+                            {futuresQuote.timestamp}
                           </p>
                         </div>
                         <div className="text-center">
