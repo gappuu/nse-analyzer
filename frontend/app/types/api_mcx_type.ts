@@ -88,6 +88,20 @@ export interface AlertValues {
   days_to_expiry: number;
 }
 
+export interface BatchSummary {
+  total_securities: number;
+  successful: number;
+  failed: number;
+  securities_with_alerts: number;
+  total_alerts: number;
+  processing_time_ms: number;
+}
+
+export interface BatchAnalysisResponse {
+  summary: BatchSummary;
+  rules_output: RulesOutput[];
+}
+
 export interface McxFutureQuoteResponse {
   // Define based on actual API response structure
   [key: string]: any;
