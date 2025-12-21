@@ -127,7 +127,7 @@ function CommodityPageContent() {
         if (response.data.d && response.data.d.Data && response.data.d.Data.length > 0) {
           const data = response.data.d.Data[0];
           const summary = response.data.d.Summary;
-          
+
           const {
             PercentChange: pchange,
             ChangeInOpenInterest: changeInOI,
@@ -140,6 +140,7 @@ function CommodityPageContent() {
             AveragePrice: AveragePrice,
             LifeTimeLow: LifeTimeLow,
             LTP: LTP,
+            pchangeinOpenInterest: pchangeinOpenInterest,
             TradingUnit: TradingUnit,
             Category: Category,
             action:action
@@ -147,16 +148,16 @@ function CommodityPageContent() {
           
           const futureAnalysis: McxFutureAnalysis = {
             action,
-            underlyingValue: previousClose, // Use previous close as underlying value
+            underlyingValue: previousClose, 
             timestamp:summary.AsOn,
-            lastPrice: previousClose + absoluteChange, // Current price
+            lastPrice: previousClose + absoluteChange, 
             openInterest,
             changeinOpenInterest: changeInOI,
             expiryDate,
             percentChange: pchange,
             absoluteChange,
             previousClose,
-      
+            pchangeinOpenInterest,
             Productdesc,
             LifeTimeHigh,
             AveragePrice,
@@ -168,7 +169,6 @@ function CommodityPageContent() {
           
           setFuturesQuote(futureAnalysis);
           
-          // Store the raw response data for detailed view
           const dataWithAge: McxDataWithAge<McxFutureQuoteResponse> = {
             data: response.data,
             age: response.lastUpdated ? db.getDataAge(response.lastUpdated) : 'just now',
@@ -1060,8 +1060,10 @@ function CommodityPageContent() {
                           ₹{futuresQuote.LTP?.toFixed(2)}
                         </p>
                         <p className={`text-sm mt-1 ${futuresQuote.percentChange && futuresQuote.percentChange >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                          {futuresQuote.absoluteChange && futuresQuote.absoluteChange >= 0 ? '+' : ''}₹{futuresQuote.absoluteChange?.toFixed(2)} 
-                          ({futuresQuote.percentChange && futuresQuote.percentChange >= 0 ? '+' : ''}{futuresQuote.percentChange?.toFixed(2)}%)
+                          {futuresQuote.absoluteChange && futuresQuote.absoluteChange >= 0 ? '+' : ''}₹{futuresQuote.absoluteChange?.toFixed(2)} or 
+                          ({futuresQuote.percentChange && futuresQuote.percentChange >= 0 ? '+' : ''}
+                          {futuresQuote.percentChange ? (futuresQuote.percentChange * 100)?.toFixed(2) : 0}%)
+
                         </p>
                       </div>
 
@@ -1083,7 +1085,15 @@ function CommodityPageContent() {
                           {futuresQuote.openInterest.toLocaleString("en-IN")}
                         </p>
                         <p className={`text-sm mt-1 ${futuresQuote.changeinOpenInterest >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                          {futuresQuote.changeinOpenInterest >= 0 ? '+' : ''}{futuresQuote.changeinOpenInterest.toLocaleString("en-IN")} change
+                          (
+                            {futuresQuote.changeinOpenInterest >= 0 ? '+' : ' '}
+                            {futuresQuote.changeinOpenInterest.toLocaleString("en-IN")} 
+                          )
+                          or 
+                          ( 
+                            {futuresQuote.changeinOpenInterest >= 0 ? '+' : ' '}
+                            {futuresQuote.pchangeinOpenInterest ? (futuresQuote.pchangeinOpenInterest * 100)?.toFixed(2) : 0}%
+                          )
                         </p>
                       </div>
                     </div>
