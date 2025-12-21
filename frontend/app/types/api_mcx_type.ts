@@ -119,6 +119,8 @@ export interface McxFutureQuoteApiResponse {
         AveragePrice: number;
         LifeTimeLow: number;
         LTP: number;
+        action?: string;
+        pchangeinOpenInterest?: number;
       }>;
       Summary: {
         AsOn: string; // Format: "/Date(1766168956660)/"
@@ -146,17 +148,19 @@ export interface McxFutureQuoteResponse {
       LifeTimeLow: number;
       Category: string;
       LTP: number;
+      action?: string;
+      pchangeinOpenInterest?: number;
     }>;
     Summary: {
-      AsOn: string; // Format: "/Date(1766168956660)/"
+      AsOn: string;
     };
   };
 }
 
 // MCX Future Analysis Helper Interface
 export interface McxFutureAnalysis {
-  action: string;
-  color: string;
+  action?: string;
+  pchangeinOpenInterest?: number;
   underlyingValue: number;
   timestamp: string;
   lastPrice: number;

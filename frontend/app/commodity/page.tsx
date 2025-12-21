@@ -85,21 +85,6 @@ function CommodityPageContent() {
     return db.getDataAge(lastUpdated, currentTime);
   };
 
-  // Function to convert MCX date format "/Date(1766168956660)/" to readable timestamp
-  const convertMcxDate = (mcxDateString: string): string => {
-    try {
-      // Extract the epoch timestamp from "/Date(1766168956660)/"
-      const match = mcxDateString.match(/\/Date\((\d+)\)\//);
-      if (match) {
-        const timestamp = parseInt(match[1]);
-        return new Date(timestamp).toLocaleString();
-      }
-      return mcxDateString;
-    } catch (error) {
-      console.error('Error converting MCX date:', error);
-      return mcxDateString;
-    }
-  };
   const getDataTimestampAge = (timestampString?: string) => {
     try {
       if (!timestampString) return 'unknown';
@@ -156,37 +141,12 @@ function CommodityPageContent() {
             LifeTimeLow: LifeTimeLow,
             LTP: LTP,
             TradingUnit: TradingUnit,
-            Category: Category
-          } = data;
-          
-          // Calculate pchangeinOpenInterest
-          const pchangeinOpenInterest = changeInOI / (changeInOI + openInterest);
-          
-          let action = '';
-          let color = '';
-          
-          if (pchange > 0 && pchangeinOpenInterest > 0) {
-            action = 'Long Buildup';
-            color = 'text-green-400';
-          } else if (pchange > 0 && pchangeinOpenInterest < 0) {
-            action = 'Short Covering';
-            color = 'text-gray-300';
-          } else if (pchange < 0 && pchangeinOpenInterest > 0) {
-            action = 'Short Buildup';
-            color = 'text-red-400';
-          } else if (pchange < 0 && pchangeinOpenInterest < 0) {
-            action = 'Long Covering';
-            color = 'text-gray-300';
-          } else {
-            action = 'Neutral';
-            color = 'text-gray-400';
-          }
-          
-          
+            Category: Category,
+            action:action
+          } = data;  
           
           const futureAnalysis: McxFutureAnalysis = {
             action,
-            color,
             underlyingValue: previousClose, // Use previous close as underlying value
             timestamp:summary.AsOn,
             lastPrice: previousClose + absoluteChange, // Current price
@@ -220,7 +180,6 @@ function CommodityPageContent() {
           console.error('Invalid futures data structure:', response.data);
           setFuturesQuote({
             action: 'No Data',
-            color: 'text-gray-500',
             underlyingValue: 0,
             timestamp: '',
             lastPrice: 0,
@@ -233,7 +192,6 @@ function CommodityPageContent() {
         console.error('No futures data available or API error:', response.error);
         setFuturesQuote({
           action: 'No Data',
-          color: 'text-gray-500',
           underlyingValue: 0,
           timestamp: '',
           lastPrice: 0,
@@ -246,7 +204,6 @@ function CommodityPageContent() {
       console.error('Error fetching futures quote:', error);
       setFuturesQuote({
         action: 'Error',
-        color: 'text-red-400',
         underlyingValue: 0,
         timestamp: '',
         lastPrice: 0,
@@ -284,36 +241,9 @@ function CommodityPageContent() {
             ExpiryDate: expiryDate
           } = data;
           
-          // Calculate pchangeinOpenInterest
-          const pchangeinOpenInterest = changeInOI / (changeInOI + openInterest);
-          
-          let action = '';
-          let color = '';
-          
-          if (pchange > 0 && pchangeinOpenInterest > 0) {
-            action = 'Long Buildup';
-            color = 'text-green-400';
-          } else if (pchange > 0 && pchangeinOpenInterest < 0) {
-            action = 'Short Covering';
-            color = 'text-gray-300';
-          } else if (pchange < 0 && pchangeinOpenInterest > 0) {
-            action = 'Short Buildup';
-            color = 'text-red-400';
-          } else if (pchange < 0 && pchangeinOpenInterest < 0) {
-            action = 'Long Covering';
-            color = 'text-gray-300';
-          } else {
-            action = 'Neutral';
-            color = 'text-gray-400';
-          }
-          
-          const asOnTimestamp = convertMcxDate(summary.AsOn);
-          
           setLatestFuturesData({
-            action,
-            color,
             underlyingValue: previousClose,
-            timestamp: asOnTimestamp,
+            timestamp: summary.AsOn,
             lastPrice: previousClose + absoluteChange,
             openInterest,
             changeinOpenInterest: changeInOI,
@@ -883,7 +813,7 @@ function CommodityPageContent() {
                                 <div className="font-bold">
                                   FUTURES
                                   {latestFuturesData && (
-                                    <span className={`text-l ${latestFuturesData.color}`}>
+                                    <span className={`text-l `}>
                                       {latestFuturesData.action}
                                     </span>
                                   )}
@@ -1139,7 +1069,7 @@ function CommodityPageContent() {
                         <div className="flex items-center gap-3 mb-2">
                           <span className="text-sm text-gray-400">Action Analysis</span>
                         </div>
-                        <p className={`text-2xl font-bold ${futuresQuote.color}`}>
+                        <p className={`text-2xl font-bold`}>
                           {futuresQuote.action}
                         </p>
                         <p className="text-sm text-gray-500 mt-1">market sentiment</p>
