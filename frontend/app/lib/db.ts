@@ -103,8 +103,13 @@ export const DB_KEYS = {
   MCX_OPTION_QUOTE: (commodity: string, expiry: string, optionType: string, strikePrice: string) => 
     `mcx_option_quote:${commodity}:${expiry}:${optionType}:${strikePrice}`,
   MCX_BATCH_ANALYSIS: 'mcx_batch_analysis',
-  MCX_HISTORICAL_DATA: (symbol: string, expiry: string, fromDate: string, toDate: string) =>
-    `mcx_historical:${symbol}:${expiry}:${fromDate}:${toDate}`
+  
+  // Enhanced MCX Historical Data key with all required parameters
+  MCX_HISTORICAL_DATA: (...params: string[]) => {
+    // Parameters: symbol, expiry, from_date, to_date, instrument_name, option_type?, strike_price?
+    const [symbol, expiry, fromDate, toDate, instrumentName, optionType = 'null', strikePrice = 'null'] = params;
+    return `mcx_historical:${symbol}:${expiry}:${fromDate}:${toDate}:${instrumentName}:${optionType}:${strikePrice}`;
+  }
 } as const;
 
 // Singleton instance

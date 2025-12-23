@@ -205,6 +205,17 @@ export interface McxBatchAnalysisResponse {
   rules_output: RulesOutput[];
 }
 
+// MCX Historical Data Request Parameters
+export interface McxHistoricalDataParams {
+  symbol: string;
+  expiry: string;
+  from_date: string;
+  to_date: string;
+  instrument_name: 'FUTCOM' | 'OPTFUT';
+  option_type?: 'CE' | 'PE';
+  strike_price?: string;
+}
+
 // MCX Historical Data Response Structure
 export interface McxHistoricalDataResponse {
   symbol: string;

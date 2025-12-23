@@ -1,20 +1,19 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   X,
-  Calendar,
+  Clock,
   TrendingUp,
   // TrendingDown,
-  Clock,
+  Activity,
   Loader2,
   AlertCircle,
-  BarChart3,
-  Activity,
-  DollarSign
+  BarChart,
+  // Minus
 } from 'lucide-react';
-import { mcxApiClient, handleMcxApiError, getMcxCommodityIcon } from '@/app/lib/api_mcx';
-// import { McxHistoricalDataResponse } from '@/app/types/api_mcx_type';
+import { mcxApiClient, getMcxCommodityIcon, handleMcxApiError } from '@/app/lib/api_mcx';
+import { McxHistoricalDataParams } from '@/app/types/api_mcx_type';
 
 interface McxHistoricalDataModalProps {
   isOpen: boolean;
@@ -50,7 +49,6 @@ export default function McxHistoricalDataModal({
   const [historicalData, setHistoricalData] = useState<HistoricalDataPoint[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [chartData, setChartData] = useState<any[]>([]);
 
   // Helper functions for date formatting
   const formatDateForAPI = (date: Date): string => {
@@ -88,38 +86,54 @@ export default function McxHistoricalDataModal({
       };
     } catch {
       return {
-        formattedDate: timestamp,
-        formattedTime: ''
+        formattedDate: 'Invalid Date',
+        formattedTime: 'Invalid Time'
       };
     }
   };
 
+  // Fetch historical data with new API parameters
   const fetchHistoricalData = async () => {
     if (!symbol || !expiry) return;
-
+    
     try {
       setLoading(true);
       setError(null);
-
-      // Calculate date range (20 days back from today)
+      
+      // Calculate date range (20 days back)
       const toDate = new Date();
       const fromDate = new Date();
-      fromDate.setDate(fromDate.getDate() - 20);
-
-      const params = {
+      fromDate.setDate(toDate.getDate() - 20);
+      
+      // Format expiry for API
+      const formattedExpiry = formatExpiryForAPI(expiry);
+      
+      // Build API parameters with new required fields
+      const params: McxHistoricalDataParams = {
         symbol,
-        expiry: formatExpiryForAPI(expiry),
+        expiry: formattedExpiry,
         from_date: formatDateForAPI(fromDate),
-        to_date: formatDateForAPI(toDate)
+        to_date: formatDateForAPI(toDate),
+        instrument_name: dataType === 'futures' ? 'FUTCOM' : 'OPTFUT'
       };
 
-      const response = await mcxApiClient.getHistoricalData(params);
+      // Add option-specific parameters if it's an option
+      if (dataType === 'options') {
+        if (!optionType || strikePrice === undefined) {
+          setError('Option type and strike price are required for options data');
+          return;
+        }
+        params.option_type = optionType;
+        params.strike_price = strikePrice.toString();
+      }
 
+      console.log('Fetching historical data with params:', params);
+      
+      const response = await mcxApiClient.getHistoricalData(params);
+      
       if (response.success && response.data) {
-        // Process the historical data
         const processedData: HistoricalDataPoint[] = response.data.data.map(item => {
-          const { formattedDate, formattedTime } = formatTimestamp(item.FH_TIMESTAMP);
-          
+          const timeFormatting = formatTimestamp(item.FH_TIMESTAMP);
           return {
             timestamp: item.FH_TIMESTAMP,
             underlyingValue: item.FH_UNDERLYING_VALUE,
@@ -128,59 +142,56 @@ export default function McxHistoricalDataModal({
             settlePrice: item.FH_SETTLE_PRICE,
             strikePrice: item.FH_STRIKE_PRICE,
             optionType: item.FH_OPTION_TYPE,
-            formattedDate,
-            formattedTime
+            formattedDate: timeFormatting.formattedDate,
+            formattedTime: timeFormatting.formattedTime
           };
         });
-
+        
         // Sort by timestamp (most recent first)
         processedData.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-
+        
         setHistoricalData(processedData);
-        setChartData(prepareChartData(processedData));
       } else {
         setError(response.error || 'Failed to fetch historical data');
       }
     } catch (err) {
       setError(handleMcxApiError(err));
+      console.error('Error fetching historical data:', err);
     } finally {
       setLoading(false);
     }
   };
 
-  const prepareChartData = (data: HistoricalDataPoint[]) => {
-    return data
-      .slice()
-      .reverse() // Reverse for chronological order in chart
-      .map((item, index) => ({
-        index: index + 1,
-        date: item.formattedDate,
-        time: item.formattedTime,
-        underlyingValue: item.underlyingValue,
-        openInterest: item.openInterest,
-        settlePrice: item.settlePrice,
-        changeInOI: item.changeInOI
-      }));
-  };
-
+  // Fetch data when modal opens or parameters change
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && symbol && expiry) {
       fetchHistoricalData();
     }
   }, [isOpen, symbol, expiry, dataType, optionType, strikePrice]);
 
   // Calculate summary statistics
-  const summaryStats = React.useMemo(() => {
-    if (historicalData.length === 0) return null;
+  const summaryStats = useMemo(() => {
+    if (historicalData.length === 0) {
+      return {
+        priceChange: 0,
+        priceChangePercent: 0,
+        oiChange: 0,
+        oiChangePercent: 0,
+        avgPrice: 0,
+        avgOI: 0,
+        latest: null,
+        oldest: null
+      };
+    }
 
     const latest = historicalData[0];
     const oldest = historicalData[historicalData.length - 1];
     
     const priceChange = latest.settlePrice - oldest.settlePrice;
-    const priceChangePercent = ((priceChange / oldest.settlePrice) * 100);
+    const priceChangePercent = oldest.settlePrice ? ((priceChange / oldest.settlePrice) * 100) : 0;
     
     const oiChange = latest.openInterest - oldest.openInterest;
-    const oiChangePercent = oldest.openInterest > 0 ? ((oiChange / oldest.openInterest) * 100) : 0;
+    const oiChangePercent = oldest.openInterest ? ((oiChange / oldest.openInterest) * 100) : 0;
 
     const avgPrice = historicalData.reduce((sum, item) => sum + item.settlePrice, 0) / historicalData.length;
     const avgOI = historicalData.reduce((sum, item) => sum + item.openInterest, 0) / historicalData.length;
@@ -196,6 +207,27 @@ export default function McxHistoricalDataModal({
       oldest
     };
   }, [historicalData]);
+
+  // Create mini chart data
+  const createMiniChart = (values: number[], type: 'price' | 'oi') => {
+    if (values.length === 0) return [];
+    
+    const max = Math.max(...values);
+    const min = Math.min(...values);
+    const range = max - min;
+    
+    return values.reverse().map((value, index) => {
+      const normalizedHeight = range > 0 ? ((value - min) / range) * 100 : 50;
+      const isIncreasing = index === 0 ? false : value >= values[index - 1];
+      
+      return {
+        height: normalizedHeight,
+        color: type === 'price' 
+          ? (isIncreasing ? '#10b981' : '#ef4444')
+          : (isIncreasing ? '#3b82f6' : '#f59e0b')
+      };
+    });
+  };
 
   if (!isOpen) return null;
 
@@ -225,7 +257,7 @@ export default function McxHistoricalDataModal({
                 )}
               </p>
               <p className="text-xs text-gray-500 mt-1">
-                Last 20 days data
+                Last 20 days data • Instrument: {dataType === 'futures' ? 'FUTCOM' : 'OPTFUT'}
               </p>
             </div>
           </div>
@@ -245,6 +277,10 @@ export default function McxHistoricalDataModal({
               <div className="text-center">
                 <Loader2 className="w-8 h-8 animate-spin mx-auto text-nse-accent mb-4" />
                 <p className="text-gray-400">Loading historical data...</p>
+                <p className="text-xs text-gray-500 mt-2">
+                  Fetching {dataType} data for {symbol} ({expiry})
+                  {dataType === 'options' && ` - ${optionType} ${strikePrice}`}
+                </p>
               </div>
             </div>
           ) : error ? (
@@ -264,175 +300,155 @@ export default function McxHistoricalDataModal({
           ) : historicalData.length === 0 ? (
             <div className="flex items-center justify-center py-12">
               <div className="text-center">
-                <BarChart3 className="w-12 h-12 text-gray-500 mx-auto mb-4" />
+                <BarChart className="w-12 h-12 text-gray-500 mx-auto mb-4" />
                 <h3 className="text-lg font-semibold text-gray-300 mb-2">No Data Available</h3>
                 <p className="text-gray-500">
-                  No historical data found for this {dataType} contract.
+                  No historical data found for the specified parameters
                 </p>
               </div>
             </div>
           ) : (
-            <div className="space-y-6">
-              {/* Summary Statistics */}
-              {summaryStats && (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                  <div className="card-glow rounded-lg p-4">
-                    <div className="flex items-center gap-2 mb-2">
-                      <DollarSign className="w-4 h-4 text-nse-accent" />
-                      <span className="text-sm text-gray-400">Latest Price</span>
-                    </div>
-                    <p className="text-xl font-bold text-gray-100">
-                      ₹{summaryStats.latest.settlePrice.toFixed(2)}
-                    </p>
-                    <p className={`text-sm ${summaryStats.priceChange >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {summaryStats.priceChange >= 0 ? '+' : ''}₹{summaryStats.priceChange.toFixed(2)} 
-                      ({summaryStats.priceChangePercent >= 0 ? '+' : ''}{summaryStats.priceChangePercent.toFixed(2)}%)
-                    </p>
+            <>
+              {/* Summary Cards */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                <div className="card-glow rounded-lg p-6">
+                  <div className="flex items-center gap-3 mb-2">
+                    <TrendingUp className="w-5 h-5 text-nse-accent" />
+                    <span className="text-sm text-gray-400">Latest Price</span>
                   </div>
+                  <p className="text-2xl font-bold text-gray-100">
+                    ₹{summaryStats.latest?.settlePrice.toFixed(2)}
+                  </p>
+                  <p className={`text-sm mt-1 ${summaryStats.priceChange >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                    {summaryStats.priceChange >= 0 ? '+' : ''}₹{summaryStats.priceChange.toFixed(2)} 
+                    ({summaryStats.priceChangePercent >= 0 ? '+' : ''}{summaryStats.priceChangePercent.toFixed(2)}%)
+                  </p>
+                </div>
 
-                  <div className="card-glow rounded-lg p-4">
-                    <div className="flex items-center gap-2 mb-2">
-                      <Activity className="w-4 h-4 text-nse-accent" />
-                      <span className="text-sm text-gray-400">Open Interest</span>
-                    </div>
-                    <p className="text-xl font-bold text-gray-100">
-                      {summaryStats.latest.openInterest.toLocaleString('en-IN')}
-                    </p>
-                    <p className={`text-sm ${summaryStats.oiChange >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {summaryStats.oiChange >= 0 ? '+' : ''}{summaryStats.oiChange.toLocaleString('en-IN')} 
-                      ({summaryStats.oiChangePercent >= 0 ? '+' : ''}{summaryStats.oiChangePercent.toFixed(2)}%)
-                    </p>
+                <div className="card-glow rounded-lg p-6">
+                  <div className="flex items-center gap-3 mb-2">
+                    <BarChart className="w-5 h-5 text-blue-400" />
+                    <span className="text-sm text-gray-400">Open Interest</span>
                   </div>
+                  <p className="text-2xl font-bold text-gray-100">
+                    {summaryStats.latest?.openInterest.toLocaleString('en-IN')}
+                  </p>
+                  <p className={`text-sm mt-1 ${summaryStats.oiChange >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                    {summaryStats.oiChange >= 0 ? '+' : ''}{summaryStats.oiChange.toLocaleString('en-IN')} 
+                    ({summaryStats.oiChangePercent >= 0 ? '+' : ''}{summaryStats.oiChangePercent.toFixed(2)}%)
+                  </p>
+                </div>
 
-                  <div className="card-glow rounded-lg p-4">
-                    <div className="flex items-center gap-2 mb-2">
-                      <BarChart3 className="w-4 h-4 text-nse-accent" />
-                      <span className="text-sm text-gray-400">Avg Price (20D)</span>
-                    </div>
-                    <p className="text-xl font-bold text-gray-100">
-                      ₹{summaryStats.avgPrice.toFixed(2)}
-                    </p>
+                <div className="card-glow rounded-lg p-6">
+                  <div className="flex items-center gap-3 mb-2">
+                    <Activity className="w-5 h-5 text-purple-400" />
+                    <span className="text-sm text-gray-400">Average Price</span>
                   </div>
+                  <p className="text-2xl font-bold text-gray-100">
+                    ₹{summaryStats.avgPrice.toFixed(2)}
+                  </p>
+                  <p className="text-sm text-gray-500 mt-1">20-day average</p>
+                </div>
 
-                  <div className="card-glow rounded-lg p-4">
-                    <div className="flex items-center gap-2 mb-2">
-                      <TrendingUp className="w-4 h-4 text-nse-accent" />
-                      <span className="text-sm text-gray-400">Avg OI (20D)</span>
-                    </div>
-                    <p className="text-xl font-bold text-gray-100">
-                      {summaryStats.avgOI.toLocaleString('en-IN')}
-                    </p>
+                <div className="card-glow rounded-lg p-6">
+                  <div className="flex items-center gap-3 mb-2">
+                    <BarChart className="w-5 h-5 text-orange-400" />
+                    <span className="text-sm text-gray-400">Average OI</span>
+                  </div>
+                  <p className="text-2xl font-bold text-gray-100">
+                    {summaryStats.avgOI.toLocaleString('en-IN')}
+                  </p>
+                  <p className="text-sm text-gray-500 mt-1">20-day average</p>
+                </div>
+              </div>
+
+              {/* Mini Charts */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                <div className="card-glow rounded-lg p-6">
+                  <h3 className="text-lg font-semibold text-gray-100 mb-4 flex items-center gap-2">
+                    <TrendingUp className="w-5 h-5" />
+                    Price Trend (₹)
+                  </h3>
+                  <div className="flex items-end gap-1 h-20">
+                    {createMiniChart(historicalData.map(d => d.settlePrice), 'price').map((bar, index) => (
+                      <div
+                        key={index}
+                        className="flex-1 rounded-t transition-all hover:opacity-80"
+                        style={{
+                          height: `${bar.height}%`,
+                          backgroundColor: bar.color,
+                          minHeight: '4px'
+                        }}
+                      />
+                    ))}
                   </div>
                 </div>
-              )}
 
-              {/* Simple Chart Visualization */}
-              <div className="card-glow rounded-lg p-6">
-                <h3 className="text-lg font-semibold text-gray-100 mb-4 flex items-center">
-                  <BarChart3 className="w-5 h-5 mr-2 text-nse-accent" />
-                  Price & Open Interest Trend
-                </h3>
-                
-                {/* Mini Chart using CSS */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  {/* Price Chart */}
-                  <div>
-                    <h4 className="text-md font-medium text-gray-200 mb-3">Settlement Price</h4>
-                    <div className="h-32 flex items-end gap-1 bg-slate-800/50 rounded p-3">
-                      {chartData.slice(-10).map((item, index) => {
-                        const maxPrice = Math.max(...chartData.map(d => d.settlePrice));
-                        const height = (item.settlePrice / maxPrice) * 100;
-                        return (
-                          <div
-                            key={index}
-                            className="flex-1 bg-nse-accent opacity-70 hover:opacity-100 transition-opacity rounded-t"
-                            style={{ height: `${height}%` }}
-                            title={`${item.date}: ₹${item.settlePrice}`}
-                          />
-                        );
-                      })}
-                    </div>
-                    <div className="text-xs text-gray-500 mt-2 text-center">
-                      Last 10 days
-                    </div>
-                  </div>
-
-                  {/* OI Chart */}
-                  <div>
-                    <h4 className="text-md font-medium text-gray-200 mb-3">Open Interest</h4>
-                    <div className="h-32 flex items-end gap-1 bg-slate-800/50 rounded p-3">
-                      {chartData.slice(-10).map((item, index) => {
-                        const maxOI = Math.max(...chartData.map(d => d.openInterest));
-                        const height = maxOI > 0 ? (item.openInterest / maxOI) * 100 : 0;
-                        return (
-                          <div
-                            key={index}
-                            className="flex-1 bg-blue-500 opacity-70 hover:opacity-100 transition-opacity rounded-t"
-                            style={{ height: `${height}%` }}
-                            title={`${item.date}: ${item.openInterest.toLocaleString('en-IN')}`}
-                          />
-                        );
-                      })}
-                    </div>
-                    <div className="text-xs text-gray-500 mt-2 text-center">
-                      Last 10 days
-                    </div>
+                <div className="card-glow rounded-lg p-6">
+                  <h3 className="text-lg font-semibold text-gray-100 mb-4 flex items-center gap-2">
+                    <BarChart className="w-5 h-5" />
+                    Open Interest Trend
+                  </h3>
+                  <div className="flex items-end gap-1 h-20">
+                    {createMiniChart(historicalData.map(d => d.openInterest), 'oi').map((bar, index) => (
+                      <div
+                        key={index}
+                        className="flex-1 rounded-t transition-all hover:opacity-80"
+                        style={{
+                          height: `${bar.height}%`,
+                          backgroundColor: bar.color,
+                          minHeight: '4px'
+                        }}
+                      />
+                    ))}
                   </div>
                 </div>
               </div>
 
-              {/* Historical Data Table */}
+              {/* Data Table */}
               <div className="card-glow rounded-lg overflow-hidden">
-                <div className="px-6 py-4 border-b border-gray-700">
-                  <h3 className="text-lg font-semibold text-gray-100 flex items-center">
-                    <Calendar className="w-5 h-5 mr-2 text-nse-accent" />
+                <div className="p-6 border-b border-gray-700">
+                  <h3 className="text-lg font-semibold text-gray-100 flex items-center gap-2">
+                    <Clock className="w-5 h-5" />
                     Historical Data ({historicalData.length} records)
                   </h3>
                 </div>
                 
                 <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead className="bg-slate-800">
+                  <table className="data-table">
+                    <thead>
                       <tr>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
-                          Date & Time
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
-                          Settlement Price
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
-                          Underlying Value
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
-                          Open Interest
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
-                          OI Change
-                        </th>
+                        <th>Date</th>
+                        <th>Time</th>
+                        <th>Underlying Value</th>
+                        <th>Settle Price</th>
+                        <th>Open Interest</th>
+                        <th>Change in OI</th>
                         {dataType === 'options' && (
                           <>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
-                              Strike Price
-                            </th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
-                              Option Type
-                            </th>
+                            <th>Strike Price</th>
+                            <th>Option Type</th>
                           </>
                         )}
                       </tr>
                     </thead>
-                    <tbody className="bg-slate-900 divide-y divide-gray-700">
+                    <tbody>
                       {historicalData.map((item, index) => (
-                        <tr key={index} className="hover:bg-slate-800/50 transition-colors">
+                        <tr key={index}>
                           <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="flex flex-col">
-                              <span className="text-sm font-medium text-gray-100">
-                                {item.formattedDate}
-                              </span>
-                              <span className="text-xs text-gray-400">
-                                {item.formattedTime}
-                              </span>
-                            </div>
+                            <span className="text-sm font-medium text-gray-100">
+                              {item.formattedDate}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <span className="text-sm text-gray-300">
+                              {item.formattedTime}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <span className="text-sm font-medium text-gray-100">
+                              ₹{item.underlyingValue.toFixed(2)}
+                            </span>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             <span className="text-sm font-medium text-gray-100">
@@ -440,17 +456,12 @@ export default function McxHistoricalDataModal({
                             </span>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
-                            <span className="text-sm text-gray-300">
-                              ₹{item.underlyingValue.toFixed(2)}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <span className="text-sm text-gray-300">
+                            <span className="text-sm text-gray-100">
                               {item.openInterest.toLocaleString('en-IN')}
                             </span>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
-                            <span className={`text-sm ${
+                            <span className={`text-sm font-medium ${
                               item.changeInOI > 0 ? 'text-green-400' : 
                               item.changeInOI < 0 ? 'text-red-400' : 'text-gray-400'
                             }`}>
@@ -460,7 +471,7 @@ export default function McxHistoricalDataModal({
                           {dataType === 'options' && (
                             <>
                               <td className="px-6 py-4 whitespace-nowrap">
-                                <span className="text-sm text-gray-300">
+                                <span className="text-sm text-gray-100">
                                   {item.strikePrice ? `₹${item.strikePrice}` : '-'}
                                 </span>
                               </td>
@@ -480,7 +491,7 @@ export default function McxHistoricalDataModal({
                   </table>
                 </div>
               </div>
-            </div>
+            </>
           )}
         </div>
 
@@ -489,6 +500,9 @@ export default function McxHistoricalDataModal({
           <div className="flex items-center gap-2 text-sm text-gray-400">
             <Clock className="w-4 h-4" />
             Data refreshed automatically
+            <span className="text-xs text-gray-500 ml-2">
+              • Instrument: {dataType === 'futures' ? 'FUTCOM' : 'OPTFUT'}
+            </span>
           </div>
           <div className="flex gap-2">
             <button

@@ -9,6 +9,7 @@ import {
   McxOptionQuoteResponse,
   McxBatchAnalysisResponse,
   McxHistoricalDataResponse,
+  McxHistoricalDataParams,
   // McxDataWithAge
 } from '@/app/types/api_mcx_type';
 
@@ -246,15 +247,20 @@ export const mcxApiClient = {
     }
   },
 
-  // MCX Historical Data
-  async getHistoricalData(params: {
-    symbol: string;
-    expiry: string;
-    from_date: string;
-    to_date: string;
-  }): Promise<McxApiResponse<McxHistoricalDataResponse>> {
+  // MCX Historical Data - Updated with new required parameters
+  async getHistoricalData(params: McxHistoricalDataParams): Promise<McxApiResponse<McxHistoricalDataResponse>> {
     try {
-      const key = DB_KEYS.MCX_HISTORICAL_DATA(params.symbol, params.expiry, params.from_date, params.to_date);
+      // Create cache key that includes all parameters
+      const keyParams = [
+        params.symbol,
+        params.expiry,
+        params.from_date,
+        params.to_date,
+        params.instrument_name,
+        params.option_type || 'null',
+        params.strike_price || 'null'
+      ];
+      const key = DB_KEYS.MCX_HISTORICAL_DATA(...keyParams);
       
       const cachedData = await db.getData<McxHistoricalDataResponse>(key);
       if (cachedData) {
@@ -267,12 +273,22 @@ export const mcxApiClient = {
         };
       }
 
+      // Build query parameters including the new required fields
       const queryParams = new URLSearchParams({
         symbol: params.symbol,
         expiry: params.expiry,
         from_date: params.from_date,
-        to_date: params.to_date
+        to_date: params.to_date,
+        instrument_name: params.instrument_name
       });
+
+      // Add optional parameters for options
+      if (params.option_type) {
+        queryParams.set('option_type', params.option_type);
+      }
+      if (params.strike_price) {
+        queryParams.set('strike', params.strike_price);
+      }
 
       const response = await api.get(`/api/mcx/historic-data?${queryParams.toString()}`);
       const apiResponse: McxApiResponse<McxHistoricalDataResponse> = response.data;
@@ -286,6 +302,34 @@ export const mcxApiClient = {
       console.error('Error fetching MCX historical data:', error);
       throw error;
     }
+  },
+
+  // Helper method to get historical data for futures
+  async getFuturesHistoricalData(params: {
+    symbol: string;
+    expiry: string;
+    from_date: string;
+    to_date: string;
+  }): Promise<McxApiResponse<McxHistoricalDataResponse>> {
+    return this.getHistoricalData({
+      ...params,
+      instrument_name: 'FUTCOM'
+    });
+  },
+
+  // Helper method to get historical data for options
+  async getOptionsHistoricalData(params: {
+    symbol: string;
+    expiry: string;
+    from_date: string;
+    to_date: string;
+    option_type: 'CE' | 'PE';
+    strike_price: string;
+  }): Promise<McxApiResponse<McxHistoricalDataResponse>> {
+    return this.getHistoricalData({
+      ...params,
+      instrument_name: 'OPTFUT'
+    });
   },
 
   // Check if data exists in cache
@@ -311,6 +355,19 @@ export const mcxApiClient = {
 
   async hasBatchAnalysis(): Promise<boolean> {
     return await db.hasData(DB_KEYS.MCX_BATCH_ANALYSIS);
+  },
+
+  async hasHistoricalData(params: McxHistoricalDataParams): Promise<boolean> {
+    const keyParams = [
+      params.symbol,
+      params.expiry,
+      params.from_date,
+      params.to_date,
+      params.instrument_name,
+      params.option_type || 'null',
+      params.strike_price || 'null'
+    ];
+    return await db.hasData(DB_KEYS.MCX_HISTORICAL_DATA(...keyParams));
   }
 };
 

@@ -1192,12 +1192,15 @@ function CommodityPageContent() {
           </section>
         )}
 
-        {/* Historical Data Modal */}
+        {/* Historical Data Modal - FIXED EXPIRY LOGIC */}
         <McxHistoricalDataModal
           isOpen={historicalModal.isOpen}
           onClose={closeHistoricalModal}
           symbol={symbol || ''}
-          expiry={selectedType === 'futures' ? (selectedExpiry || '') : (selectedExpiry || '')}
+          expiry={historicalModal.dataType === 'futures' ? 
+            (futuresQuote?.expiryDate || latestFuturesData?.expiryDate || selectedExpiry || '') : 
+            (selectedExpiry || '')
+          }
           dataType={historicalModal.dataType}
           optionType={historicalModal.optionType}
           strikePrice={historicalModal.strikePrice}
