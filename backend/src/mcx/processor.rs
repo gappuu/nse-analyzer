@@ -386,7 +386,7 @@ pub fn calculate_pchange_in_oi(change_in_oi: Option<f64>, open_interest: Option<
     let open_interest_val = open_interest.unwrap_or(0.0);
     
     if open_interest_val + change_in_oi_val != 0.0 {
-        Some((change_in_oi_val / (open_interest_val + change_in_oi_val)) * 100.0)
+        Some((change_in_oi_val / (open_interest_val - change_in_oi_val)) * 100.0)
     } else {
         Some(0.0)
     }
