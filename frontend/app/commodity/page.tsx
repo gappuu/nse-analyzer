@@ -31,15 +31,10 @@ import {
 import { db } from '@/app/lib/db';
 import {
   McxDataWithAge,
-  // McxTickersResponse,
-  // McxFutureSymbolsResponse,
   McxOptionChainResponse,
   McxFutureQuoteResponse,
   McxFutureAnalysis,
   CombinedCommodityData,
-  // ProcessedOptionData,
-  // ProcessedOptionDetail,
-  // Alert
 } from '@/app/types/api_mcx_type';
 
 // Separate component that uses useSearchParams - wrapped in Suspense
@@ -434,9 +429,10 @@ function CommodityPageContent() {
     if (selectedExpiry) {
       if (selectedType === 'options') {
         fetchOptionChainAnalysis(selectedExpiry, true);
-        if (latestFuturesData?.expiryDate) {
-        fetchFuturesQuote(formatExpiryForAPI(latestFuturesData.expiryDate), true);
-        }
+        // if (latestFuturesData?.expiryDate) {
+        // fetchFuturesQuote(formatExpiryForAPI(latestFuturesData.expiryDate), true);
+        // fetchLatestFuturesDataFromOptionChain(latestFuturesData.expiryDate);
+        // }
       } else {
         fetchFuturesQuote(selectedExpiry, true);
       }
@@ -494,7 +490,7 @@ function CommodityPageContent() {
         {/* Header */}
         <header className="mb-8">
           <div className="flex items-center justify-between mb-4">
-            <Link href="/" className="inline-flex items-center text-gray-400 hover:text-nse-accent transition-colors">
+            <Link href="/?tab=mcx" className="inline-flex items-center text-gray-400 hover:text-nse-accent transition-colors">
               <ArrowLeft className="w-4 h-4 mr-2" />
               Back to Commodities
             </Link>

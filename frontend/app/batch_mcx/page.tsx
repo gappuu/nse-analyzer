@@ -181,11 +181,11 @@ export default function McxBatchAnalysisPage() {
         {/* Header */}
         <header className="mb-8">
           <Link 
-            href="/" 
+            href="/?tab=mcx" 
             className="inline-flex items-center text-gray-400 hover:text-nse-accent transition-colors mb-4"
           >
             <ArrowLeft className="w-4 h-4 mr-2" />
-            Back to Home
+            Back to Commodities
           </Link>
           
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">

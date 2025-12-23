@@ -55,12 +55,20 @@ export default function HomePage() {
     } else {
       document.body.classList.remove('mcx-theme');
     }
-    
     // Cleanup on unmount
     return () => {
       document.body.classList.remove('mcx-theme');
     };
   }, [activeTab]);
+
+  useEffect(() => {
+      // Check for tab parameter in URL
+      const urlParams = new URLSearchParams(window.location.search);
+      const tabParam = urlParams.get('tab');
+      if (tabParam === 'mcx' || tabParam === 'nse') {
+        setActiveTab(tabParam as TabType);
+      }
+    }, []);
 
   useEffect(() => {
     if (activeTab === 'nse') {
