@@ -216,14 +216,12 @@ function CommodityPageContent() {
     }
   };
 
-  // Function to fetch latest futures data for header display
-  const fetchLatestFuturesData = async () => {
-    if (!symbol || !commodityData?.data.futureExpiries.length) return;
+  // Function to fetch latest futures data based on latest_future_expiry from option chain
+  const fetchLatestFuturesDataFromOptionChain = async (latestFutureExpiry: string) => {
+    if (!symbol || !latestFutureExpiry) return;
     
     try {
-      // Get the latest (first) futures expiry
-      const latestExpiry = commodityData.data.futureExpiries[0];
-      const formattedExpiry = formatExpiryForAPI(latestExpiry);
+      const formattedExpiry = formatExpiryForAPI(latestFutureExpiry);
       
       const response = await mcxApiClient.getFutureQuote(symbol, formattedExpiry, false);
       
@@ -238,10 +236,12 @@ function CommodityPageContent() {
             OpenInterest: openInterest,
             PreviousClose: previousClose,
             AbsoluteChange: absoluteChange,
-            ExpiryDate: expiryDate
+            ExpiryDate: expiryDate,
+            action: action
           } = data;
           
           setLatestFuturesData({
+            action,
             underlyingValue: previousClose,
             timestamp: summary.AsOn,
             lastPrice: previousClose + absoluteChange,
@@ -327,11 +327,6 @@ function CommodityPageContent() {
             setSelectedExpiry(combinedData.futureExpiries[0]);
             setSelectedType('futures');
           }
-          
-          // Fetch latest futures data for header display
-          if (combinedData.futureExpiries.length > 0) {
-            setTimeout(() => fetchLatestFuturesData(), 100);
-          }
         } else {
           setError(tickersResponse.error || futureSymbolsResponse.error || 'Failed to load commodity data');
         }
@@ -368,6 +363,11 @@ function CommodityPageContent() {
           fromCache: response.fromCache || false
         };
         setAnalysisData(dataWithAge);
+        
+        // Fetch latest futures data using latest_future_expiry from option chain response
+        if (response.data.latest_future_expiry) {
+          await fetchLatestFuturesDataFromOptionChain(response.data.latest_future_expiry);
+        }
       } else {
         setError(response.error || 'Failed to fetch option chain');
       }
@@ -434,6 +434,9 @@ function CommodityPageContent() {
     if (selectedExpiry) {
       if (selectedType === 'options') {
         fetchOptionChainAnalysis(selectedExpiry, true);
+        if (latestFuturesData?.expiryDate) {
+        fetchFuturesQuote(formatExpiryForAPI(latestFuturesData.expiryDate), true);
+        }
       } else {
         fetchFuturesQuote(selectedExpiry, true);
       }
@@ -811,17 +814,18 @@ function CommodityPageContent() {
 
                               <td>
                                 <div className="font-bold">
-                                  FUTURES
+                                  FUTURES : 
                                   {latestFuturesData && (
                                     <span className={`text-l `}>
-                                      {latestFuturesData.action}
+                                       {latestFuturesData.action} <sub> Expiry {latestFuturesData?.expiryDate}</sub>
                                     </span>
                                   )}
                                 </div>
                                 <div>
-                                  {latestFuturesData && `₹ ${latestFuturesData.lastPrice.toLocaleString("en-IN")}`}
+                                  {latestFuturesData && `₹ ${latestFuturesData.lastPrice.toLocaleString("en-IN")}`} 
+                                  
                                 </div>
-                                <div><sub>{latestFuturesData?.expiryDate}: {getDataTimestampAge(latestFuturesData?.timestamp)}</sub></div>
+                                <div><sub>{latestFuturesData?.timestamp}: {getDataTimestampAge(latestFuturesData?.timestamp)}</sub></div>
                               </td>
 
                               <td className="px-6 py-4 text-right" colSpan={2}>

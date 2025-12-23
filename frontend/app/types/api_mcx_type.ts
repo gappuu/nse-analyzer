@@ -34,6 +34,7 @@ export interface McxOptionChainResponse {
   pe_oi: number;
   processed_data: ProcessedOptionData[];
   alerts?: RulesOutput;
+  latest_future_expiry?: string;
 }
 
 export interface ProcessedOptionData {
