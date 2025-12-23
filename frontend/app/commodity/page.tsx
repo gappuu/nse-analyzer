@@ -14,7 +14,8 @@ import {
   RefreshCw,
   Database,
   Layers,
-  BarChart
+  BarChart,
+  Activity
 } from 'lucide-react';
 import { 
   mcxApiClient, 
@@ -25,8 +26,6 @@ import {
   getAlertBadgeClass, 
   formatCurrency, 
   getMoneyStatusColor, 
-  // get20DaysAgo, 
-  // getToday 
 } from '@/app/lib/api_nse';
 import { db } from '@/app/lib/db';
 import {
@@ -36,6 +35,7 @@ import {
   McxFutureAnalysis,
   CombinedCommodityData,
 } from '@/app/types/api_mcx_type';
+import McxHistoricalDataModal from '@/app/components/mcx_historicalDataModal';
 
 // Separate component that uses useSearchParams - wrapped in Suspense
 function CommodityPageContent() {
@@ -56,6 +56,14 @@ function CommodityPageContent() {
   const [futuresLoading, setFuturesLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(Date.now());
+
+  // Historical Data Modal State
+  const [historicalModal, setHistoricalModal] = useState({
+    isOpen: false,
+    dataType: 'futures' as 'futures' | 'options',
+    optionType: undefined as 'CE' | 'PE' | undefined,
+    strikePrice: undefined as number | undefined
+  });
 
   // Apply MCX theme when component mounts
   useEffect(() => {
@@ -103,6 +111,29 @@ function CommodityPageContent() {
       console.error('Error formatting expiry date:', error);
       return expiryDate; // Return as-is if formatting fails
     }
+  };
+
+  // Historical Data Modal Handlers
+  const handleFuturesClick = () => {
+    setHistoricalModal({
+      isOpen: true,
+      dataType: 'futures',
+      optionType: undefined,
+      strikePrice: undefined
+    });
+  };
+
+  const handleOptionClick = (type: 'CE' | 'PE', strike?: number) => {
+    setHistoricalModal({
+      isOpen: true,
+      dataType: 'options',
+      optionType: type,
+      strikePrice: strike
+    });
+  };
+
+  const closeHistoricalModal = () => {
+    setHistoricalModal(prev => ({ ...prev, isOpen: false }));
   };
 
   // Function to fetch futures quote with new MCX API structure
@@ -429,10 +460,10 @@ function CommodityPageContent() {
     if (selectedExpiry) {
       if (selectedType === 'options') {
         fetchOptionChainAnalysis(selectedExpiry, true);
-        // if (latestFuturesData?.expiryDate) {
-        // fetchFuturesQuote(formatExpiryForAPI(latestFuturesData.expiryDate), true);
-        // fetchLatestFuturesDataFromOptionChain(latestFuturesData.expiryDate);
-        // }
+        if (latestFuturesData?.expiryDate) {
+          // Fetch and update latest futures data for header display
+          fetchLatestFuturesDataFromOptionChain(latestFuturesData.expiryDate);
+        }
       } else {
         fetchFuturesQuote(selectedExpiry, true);
       }
@@ -450,7 +481,7 @@ function CommodityPageContent() {
           <AlertCircle className="w-16 h-16 text-nse-error mx-auto mb-4" />
           <h1 className="text-2xl font-bold text-gray-100 mb-2">No Commodity Specified</h1>
           <p className="text-gray-400 mb-6">Please provide a commodity symbol in the URL parameters.</p>
-          <Link href="/" className="btn-primary">
+          <Link href="/?tab=mcx" className="btn-primary">
             Back to Home
           </Link>
         </div>
@@ -476,7 +507,7 @@ function CommodityPageContent() {
           <AlertCircle className="w-16 h-16 text-nse-error mx-auto mb-4" />
           <h1 className="text-2xl font-bold text-gray-100 mb-2">Error Loading Data</h1>
           <p className="text-gray-400 mb-6">{error}</p>
-          <Link href="/" className="btn-primary">
+          <Link href="/?tab=mcx" className="btn-primary">
             Back to Home
           </Link>
         </div>
@@ -809,19 +840,23 @@ function CommodityPageContent() {
                               </td>
 
                               <td>
-                                <div className="font-bold">
-                                  FUTURES : 
+                                <div 
+                                  className="font-bold cursor-pointer hover:text-nse-accent transition-colors flex items-center gap-2"
+                                  onClick={handleFuturesClick}
+                                  title="Click to view historical data"
+                                >
+                                  <Activity className="w-4 h-4" />
+                                  FUTURES
                                   {latestFuturesData && (
-                                    <span className={`text-l `}>
-                                       {latestFuturesData.action} <sub> Expiry {latestFuturesData?.expiryDate}</sub>
+                                    <span className="text-l">
+                                      {latestFuturesData.action}
                                     </span>
                                   )}
                                 </div>
                                 <div>
-                                  {latestFuturesData && `₹ ${latestFuturesData.lastPrice.toLocaleString("en-IN")}`} 
-                                  
+                                  {latestFuturesData && `₹ ${latestFuturesData.lastPrice.toLocaleString("en-IN")}`}
                                 </div>
-                                <div><sub>{latestFuturesData?.timestamp}: {getDataTimestampAge(latestFuturesData?.timestamp)}</sub></div>
+                                <div><sub>{latestFuturesData?.expiryDate}: {getDataTimestampAge(latestFuturesData?.timestamp)}</sub></div>
                               </td>
 
                               <td className="px-6 py-4 text-right" colSpan={2}>
@@ -914,8 +949,11 @@ function CommodityPageContent() {
                                       {option.CE?.pchangeinOpenInterest ? 
                                         `${option.CE.pchangeinOpenInterest > 0 ? '+' : ''}${option.CE.pchangeinOpenInterest.toFixed(1)}%` : '0'}
                                     </td>
-                                    <td className={`${option.CE ? getMoneyStatusColor(option.CE.the_money) : 'text-gray-400'}`}>
-                                      <div>
+                                    <td className={`${option.CE ? getMoneyStatusColor(option.CE.the_money) : 'text-gray-400'} cursor-pointer hover:text-nse-accent transition-colors`}
+                                        onClick={() => handleOptionClick('CE', option.strikePrice)}
+                                        title="Click to view historical data">
+                                      <div className="flex items-center gap-1">
+                                        <Activity className="w-3 h-3" />
                                         {option.CE?.the_money || '-'}
                                       </div>
                                     </td>
@@ -949,8 +987,11 @@ function CommodityPageContent() {
                                       {option.PE?.pchange ? 
                                         `${option.PE.pchange > 0 ? '+' : ''}${option.PE.pchange.toFixed(1)}%` : '-'}
                                     </td>
-                                    <td className={`${option.PE ? getMoneyStatusColor(option.PE.the_money) : 'text-gray-400'}`}>
-                                      <div>
+                                    <td className={`${option.PE ? getMoneyStatusColor(option.PE.the_money) : 'text-gray-400'} cursor-pointer hover:text-nse-accent transition-colors`}
+                                        onClick={() => handleOptionClick('PE', option.strikePrice)}
+                                        title="Click to view historical data">
+                                      <div className="flex items-center gap-1">
+                                        <Activity className="w-3 h-3" />
                                         {option.PE?.the_money || '-'}
                                       </div>
                                     </td>
@@ -1063,7 +1104,6 @@ function CommodityPageContent() {
                           {futuresQuote.absoluteChange && futuresQuote.absoluteChange >= 0 ? '+' : ''}₹{futuresQuote.absoluteChange?.toFixed(2)} or 
                           ({futuresQuote.percentChange && futuresQuote.percentChange >= 0 ? '+' : ''}
                           {futuresQuote.percentChange ? (futuresQuote.percentChange * 100)?.toFixed(2) : 0}%)
-
                         </p>
                       </div>
 
@@ -1105,6 +1145,14 @@ function CommodityPageContent() {
                         <h2 className="text-xl font-semibold text-gray-100 ">
                           {futuresQuote.Productdesc} <i>Futures Contract of </i> {futuresQuote.expiryDate}
                         </h2>
+                        <button
+                          onClick={handleFuturesClick}
+                          className="ml-auto btn-outline-primary inline-flex items-center text-sm"
+                          title="View historical data"
+                        >
+                          <Activity className="w-4 h-4 mr-2" />
+                          View History
+                        </button>
                       </div>
                       
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
@@ -1143,6 +1191,17 @@ function CommodityPageContent() {
             )}
           </section>
         )}
+
+        {/* Historical Data Modal */}
+        <McxHistoricalDataModal
+          isOpen={historicalModal.isOpen}
+          onClose={closeHistoricalModal}
+          symbol={symbol || ''}
+          expiry={selectedType === 'futures' ? (selectedExpiry || '') : (selectedExpiry || '')}
+          dataType={historicalModal.dataType}
+          optionType={historicalModal.optionType}
+          strikePrice={historicalModal.strikePrice}
+        />
       </div>
     </div>
   );

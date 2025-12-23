@@ -25,7 +25,7 @@ import {
 } from '@/app/lib/api_nse';
 import { db } from '@/app/lib/db';
 import { ContractInfoResponse, SingleAnalysisResponse, DataWithAge, FuturesAnalysis, HistoricalDataPoint } from '@/app/types/api_nse_type';
-import HistoricalDataModal from '@/app/components/HistoricalDataModal_nse';
+import HistoricalDataModal from '@/app/components/nse_historicalDataModal';
 
 // Separate component that uses useSearchParams - wrapped in Suspense
 function SecurityPageContent() {
