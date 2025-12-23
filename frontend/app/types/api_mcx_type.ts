@@ -216,20 +216,34 @@ export interface McxHistoricalDataParams {
   strike_price?: string;
 }
 
-// MCX Historical Data Response Structure
+// MCX Historical Data Response Structure (Updated to match actual API response)
 export interface McxHistoricalDataResponse {
-  symbol: string;
-  instrumentType: string;
-  expiry: string;
-  data: Array<{
-    FH_TIMESTAMP: string;
-    FH_UNDERLYING_VALUE: number;
-    FH_OPEN_INT: number;
-    FH_CHANGE_IN_OI: number;
-    FH_SETTLE_PRICE: number;
-    FH_STRIKE_PRICE?: number;
-    FH_OPTION_TYPE?: string;
-  }>;
+  d: {
+    Data: Array<{
+      Close: number;
+      Date: string;
+      DateDisplay: string;
+      ExpiryDate: string;
+      High: number;
+      InstrumentName: string;
+      Low: number;
+      Open: number;
+      OpenInterest: number;
+      OptionType: string;
+      PreviousClose: number;
+      StrikePrice: number;
+      Symbol: string;
+      Value: number;
+      Volume: number;
+      VolumeInThousands: string;
+      __type: string;
+    }>;
+    Summary: {
+      AsOn: string;
+      Count: number;
+      Status: string | null;
+    };
+  };
 }
 
 // Data with age interface for MCX

@@ -35,6 +35,12 @@ interface HistoricalDataPoint {
   optionType?: string;
   formattedDate: string;
   formattedTime: string;
+  high: number;
+  low: number;
+  open: number;
+  volume: number;
+  value: number;
+  previousClose: number;
 }
 
 export default function McxHistoricalDataModal({
@@ -74,9 +80,12 @@ export default function McxHistoricalDataModal({
     }
   };
 
-  const formatTimestamp = (timestamp: string) => {
+  const formatTimestamp = (dateString: string) => {
     try {
-      const date = new Date(timestamp);
+      // Parse date format like "12/22/2025"
+      const [month, day, year] = dateString.split('/');
+      const date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+      
       return {
         formattedDate: date.toLocaleDateString('en-IN'),
         formattedTime: date.toLocaleTimeString('en-IN', { 
@@ -92,7 +101,15 @@ export default function McxHistoricalDataModal({
     }
   };
 
-  // Fetch historical data with new API parameters
+  // Calculate change in OI from current and previous day data
+  const calculateChangeInOI = (data: any[], currentIndex: number): number => {
+    if (currentIndex >= data.length - 1) return 0;
+    const current = data[currentIndex];
+    const previous = data[currentIndex + 1];
+    return current.OpenInterest - previous.OpenInterest;
+  };
+
+  // Fetch historical data with corrected API response handling
   const fetchHistoricalData = async () => {
     if (!symbol || !expiry) return;
     
@@ -132,23 +149,43 @@ export default function McxHistoricalDataModal({
       const response = await mcxApiClient.getHistoricalData(params);
       
       if (response.success && response.data) {
-        const processedData: HistoricalDataPoint[] = response.data.data.map(item => {
-          const timeFormatting = formatTimestamp(item.FH_TIMESTAMP);
+        // Access the correct data structure: response.data.d.Data
+        const rawData = response.data.d.Data;
+        
+        if (!rawData || !Array.isArray(rawData)) {
+          setError('Invalid data format received from API');
+          return;
+        }
+
+        const processedData: HistoricalDataPoint[] = rawData.map((item, index) => {
+          const timeFormatting = formatTimestamp(item.Date);
+          const changeInOI = calculateChangeInOI(rawData, index);
+          
           return {
-            timestamp: item.FH_TIMESTAMP,
-            underlyingValue: item.FH_UNDERLYING_VALUE,
-            openInterest: item.FH_OPEN_INT,
-            changeInOI: item.FH_CHANGE_IN_OI,
-            settlePrice: item.FH_SETTLE_PRICE,
-            strikePrice: item.FH_STRIKE_PRICE,
-            optionType: item.FH_OPTION_TYPE,
+            timestamp: item.Date,
+            underlyingValue: item.Close, // Using Close as underlying value
+            openInterest: item.OpenInterest,
+            changeInOI: changeInOI,
+            settlePrice: item.Close,
+            strikePrice: item.StrikePrice > 0 ? item.StrikePrice : undefined,
+            optionType: item.OptionType !== '-' ? item.OptionType : undefined,
             formattedDate: timeFormatting.formattedDate,
-            formattedTime: timeFormatting.formattedTime
+            formattedTime: timeFormatting.formattedTime,
+            high: item.High,
+            low: item.Low,
+            open: item.Open,
+            volume: item.Volume,
+            value: item.Value,
+            previousClose: item.PreviousClose
           };
         });
         
         // Sort by timestamp (most recent first)
-        processedData.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+        processedData.sort((a, b) => {
+          const dateA = new Date(a.timestamp);
+          const dateB = new Date(b.timestamp);
+          return dateB.getTime() - dateA.getTime();
+        });
         
         setHistoricalData(processedData);
       } else {
@@ -419,11 +456,13 @@ export default function McxHistoricalDataModal({
                     <thead>
                       <tr>
                         <th>Date</th>
-                        <th>Time</th>
-                        <th>Underlying Value</th>
-                        <th>Settle Price</th>
+                        <th>Open</th>
+                        <th>High</th>
+                        <th>Low</th>
+                        <th>Close</th>
                         <th>Open Interest</th>
                         <th>Change in OI</th>
+                        <th>Volume</th>
                         {dataType === 'options' && (
                           <>
                             <th>Strike Price</th>
@@ -442,12 +481,17 @@ export default function McxHistoricalDataModal({
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             <span className="text-sm text-gray-300">
-                              {item.formattedTime}
+                              ₹{item.open.toFixed(2)}
                             </span>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
-                            <span className="text-sm font-medium text-gray-100">
-                              ₹{item.underlyingValue.toFixed(2)}
+                            <span className="text-sm font-medium text-green-400">
+                              ₹{item.high.toFixed(2)}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <span className="text-sm font-medium text-red-400">
+                              ₹{item.low.toFixed(2)}
                             </span>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
@@ -466,6 +510,11 @@ export default function McxHistoricalDataModal({
                               item.changeInOI < 0 ? 'text-red-400' : 'text-gray-400'
                             }`}>
                               {item.changeInOI > 0 ? '+' : ''}{item.changeInOI.toLocaleString('en-IN')}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <span className="text-sm text-gray-100">
+                              {item.volume.toLocaleString('en-IN')}
                             </span>
                           </td>
                           {dataType === 'options' && (
