@@ -53,6 +53,7 @@ pub struct HistoricDataQuery {
     pub expiry: String,
     pub from_date: String,  // Format: YYYYMMDD
     pub to_date: String,    // Format: YYYYMMDD
+    pub instrument_name: String, // e.g., "OPTFUT"
 }
 
 #[derive(Debug, Serialize)]
@@ -719,13 +720,13 @@ async fn get_future_symbols(State(app_state): State<AppState>) -> Result<Json<Ap
     }
 }
 
-/// GET /api/mcx/historic-data?symbol=COPPER&expiry=23DEC2025&from_date=20251215&to_date=20251219 - Get historic data
+/// GET /api/mcx/historic-data?symbol=COPPER&expiry=23DEC2025&from_date=20251215&to_date=20251219&InstrumentName='OPTFUT' - Get historic data
 async fn get_historic_data(
     Query(query): Query<HistoricDataQuery>,
     State(app_state): State<AppState>,
 ) -> Result<Json<ApiResponse<serde_json::Value>>, StatusCode> {
     let start_time = Instant::now();
-    let cache_key = format!("historic_{}_{}_{}_{}", query.symbol, query.expiry, query.from_date, query.to_date);
+    let cache_key = format!("historic_{}_{}_{}_{}_{}", query.symbol, query.expiry, query.from_date, query.to_date, query.instrument_name);
 
     // Check cache first
     {
@@ -743,7 +744,7 @@ async fn get_historic_data(
     }
 
     // Fetch from MCX API
-    match app_state.client.fetch_historic_data(&query.symbol, &query.expiry, &query.from_date, &query.to_date).await {
+    match app_state.client.fetch_historic_data(&query.symbol, &query.expiry, &query.from_date, &query.to_date, &query.instrument_name).await {
         Ok(data) => {
             // Update cache
             {
@@ -804,7 +805,7 @@ pub async fn start_mcx_server(port: u16) -> Result<()> {
     println!("   GET  /api/mcx/option-quote?commodity=COPPER&expiry=23DEC2025&option_type=CE&strike_price=1120.00");
     println!("   POST /api/mcx/batch-analysis (Latest Expiry Only - Processed Data)");
     println!("   GET  /api/mcx/future-symbols");
-    println!("   GET  /api/mcx/historic-data?symbol=COPPER&expiry=23DEC2025&from_date=20251215&to_date=20251219");
+    println!("   GET  /api/mcx/historic-data?symbol=COPPER&expiry=23DEC2025&from_date=20251215&to_date=20251219&instrument_name=OPTFUT");
     println!();
 
     axum::serve(listener, app).await?;

@@ -504,13 +504,14 @@ impl MCXClient {
         expiry: &str,
         from_date: &str,
         to_date: &str,
+        instrument_name: &str,
     ) -> Result<serde_json::Value> {
         let payload = serde_json::json!({
             "Symbol": symbol,
             "Expiry": expiry,
             "FromDate": from_date,
             "ToDate": to_date,
-            "InstrumentName": "OPTFUT"
+            "InstrumentName": instrument_name
         });
         
         let backoff = ExponentialBackoff::from_millis(RETRY_BASE_DELAY_MS)
