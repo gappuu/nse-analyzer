@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use tower_http::cors::CorsLayer;
-use chrono::NaiveDate;
+use chrono::{NaiveDate};
 
 // -----------------------------------------------
 // API REQUEST/RESPONSE MODELS
@@ -53,7 +53,9 @@ pub struct HistoricDataQuery {
     pub expiry: String,
     pub from_date: String,  // Format: YYYYMMDD
     pub to_date: String,    // Format: YYYYMMDD
-    pub instrument_name: String, // e.g., "OPTFUT"
+    pub instrument_name: String, // e.g., "OPTFUT", "FUTCOM"
+    pub option_type: Option<String>, // e.g., "CE", "PE" - only for OPTFUT
+    pub strike: Option<String>, // e.g., "1120.00" - only for OPTFUT
 }
 
 #[derive(Debug, Serialize)]
@@ -121,6 +123,53 @@ pub struct EnhancedSingleAnalysisResponse {
     pub latest_future_expiry: Option<String>,
 }
 
+// Historic data processing structures
+#[derive(Debug, Serialize, Deserialize)]
+pub struct HistoricDataResponse {
+    pub d: HistoricData,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct HistoricData {
+    #[serde(rename = "Data")]
+    pub data: Vec<HistoricRecord>,
+    #[serde(rename = "Summary")]
+    pub summary: HistoricSummary,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct HistoricRecord {
+    #[serde(rename = "Close")]
+    pub close: Option<f64>,
+    #[serde(rename = "High")]
+    pub high: Option<f64>,
+    #[serde(rename = "Low")]
+    pub low: Option<f64>,
+    #[serde(rename = "Open")]
+    pub open: Option<f64>,
+    #[serde(rename = "Volume")]
+    pub volume: Option<i64>,
+    #[serde(rename = "Date")]
+    pub date: Option<String>,
+    #[serde(rename = "OptionType")]
+    pub option_type: Option<String>,
+    #[serde(rename = "Strike")]
+    pub strike: Option<String>,
+    // Add other fields as needed
+    #[serde(flatten)]
+    pub additional_fields: HashMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct HistoricSummary {
+    #[serde(rename = "AsOn")]
+    pub as_on: String, // Will be converted from /Date()/ format to ISO timestamp
+    #[serde(rename = "Count")]
+    pub count: Option<i32>,
+    #[serde(rename = "Status")]
+    pub status: Option<String>,
+}
+
 // -----------------------------------------------
 // APPLICATION STATE
 // -----------------------------------------------
@@ -171,6 +220,66 @@ fn find_earliest_expiry(expiry_dates: &[String]) -> Option<String> {
         })
         .min_by_key(|(date, _)| *date)
         .map(|(_, date_str)| date_str)
+}
+
+
+// Helper function to process historic data response
+fn process_historic_data_response(
+    mut data: serde_json::Value,
+    option_type: &Option<String>,
+    strike: &Option<String>,
+) -> Result<serde_json::Value, String> {
+    // Convert AsOn timestamp
+    if let Some(as_on) = data.pointer_mut("/d/Summary/AsOn") {
+        if let Some(as_on_str) = as_on.as_str() {
+             let converted = processor::convert_mcx_timestamp(as_on_str);
+            *as_on = serde_json::Value::String(converted);
+        }
+    }
+
+    // Filter data if option_type and strike are provided
+    if let (Some(opt_type), Some(strike_val)) = (option_type, strike) {
+        let mut filtered_count = 0;
+        
+        // First, filter the records and count them
+        if let Some(records) = data.pointer_mut("/d/Data") {
+            if let Some(records_array) = records.as_array_mut() {
+                records_array.retain(|record| {
+                    let record_opt_type = record.get("OptionType")
+                        .and_then(|v| v.as_str());
+                    let record_strike = record.get("StrikePrice")
+                        .and_then(|v| v.as_f64());
+                    
+                    let should_keep = match (record_opt_type, record_strike) {
+                        (Some(r_opt_type), Some(r_strike)) => {
+                            // Parse the strike_val string to f64 for comparison
+                            if let Ok(strike_price) = strike_val.parse::<f64>() {
+                                r_opt_type.eq_ignore_ascii_case(opt_type) && 
+                                (r_strike - strike_price).abs() < 0.01 // Use float comparison with tolerance
+                            } else {
+                                false
+                            }
+                        }
+                        _ => false,
+                    };
+                    
+                    if should_keep {
+                        filtered_count += 1;
+                    }
+                    should_keep
+                });
+            }
+        }
+        
+        // Then update the count in summary
+        if let Some(summary) = data.pointer_mut("/d/Summary/Count") {
+            *summary = serde_json::Value::Number(
+                serde_json::Number::from(filtered_count)
+            );
+        }
+    }
+
+    Ok(data)
 }
 
 // -----------------------------------------------
@@ -720,47 +829,88 @@ async fn get_future_symbols(State(app_state): State<AppState>) -> Result<Json<Ap
     }
 }
 
-/// GET /api/mcx/historic-data?symbol=COPPER&expiry=23DEC2025&from_date=20251215&to_date=20251219&InstrumentName='OPTFUT' - Get historic data
+/// GET /api/mcx/historic-data?symbol=COPPER&expiry=23DEC2025&from_date=20251215&to_date=20251219&instrument_name=OPTFUT&option_type=CE&strike=1120.00 - Get historic data
 async fn get_historic_data(
     Query(query): Query<HistoricDataQuery>,
     State(app_state): State<AppState>,
 ) -> Result<Json<ApiResponse<serde_json::Value>>, StatusCode> {
     let start_time = Instant::now();
-    let cache_key = format!("historic_{}_{}_{}_{}_{}", query.symbol, query.expiry, query.from_date, query.to_date, query.instrument_name);
+    
+    // Create cache key including optional parameters
+    let cache_key = if let (Some(option_type), Some(strike)) = (&query.option_type, &query.strike) {
+        format!("historic_{}_{}_{}_{}_{}_{}_{}",
+            query.symbol, query.expiry, query.from_date, query.to_date,
+            query.instrument_name, option_type, strike)
+    } else {
+        format!("historic_{}_{}_{}_{}_{}", 
+            query.symbol, query.expiry, query.from_date, query.to_date, query.instrument_name)
+    };
 
     // Check cache first
     {
         let cache = app_state.cache.read().await;
         if let Some((data, cached_at)) = cache.historic_data.get(&cache_key) {
             if cached_at.elapsed() < CACHE_DURATION {
-                return Ok(Json(ApiResponse {
-                    success: true,
-                    data: Some(data.clone()),
-                    error: None,
-                    processing_time_ms: Some(start_time.elapsed().as_millis() as u64),
-                }));
+                // Process cached data if filtering is needed
+                match process_historic_data_response(data.clone(), &query.option_type, &query.strike) {
+                    Ok(processed_data) => {
+                        return Ok(Json(ApiResponse {
+                            success: true,
+                            data: Some(processed_data),
+                            error: None,
+                            processing_time_ms: Some(start_time.elapsed().as_millis() as u64),
+                        }));
+                    }
+                    Err(e) => {
+                        return Ok(Json(ApiResponse {
+                            success: false,
+                            data: None,
+                            error: Some(format!("Failed to process cached historic data: {}", e)),
+                            processing_time_ms: Some(start_time.elapsed().as_millis() as u64),
+                        }));
+                    }
+                }
             }
         }
     }
 
     // Fetch from MCX API
-    match app_state.client.fetch_historic_data(&query.symbol, &query.expiry, &query.from_date, &query.to_date, &query.instrument_name).await {
+    match app_state.client.fetch_historic_data(
+        &query.symbol, 
+        &query.expiry, 
+        &query.from_date, 
+        &query.to_date, 
+        &query.instrument_name
+    ).await {
         Ok(data) => {
-            // Update cache
-            {
-                let mut cache = app_state.cache.write().await;
-                cache.historic_data.insert(
-                    cache_key,
-                    (data.clone(), Instant::now()),
-                );
-            }
+            // Process the response data
+            match process_historic_data_response(data.clone(), &query.option_type, &query.strike) {
+                Ok(processed_data) => {
+                    // Update cache with processed data
+                    {
+                        let mut cache = app_state.cache.write().await;
+                        cache.historic_data.insert(
+                            cache_key,
+                            (processed_data.clone(), Instant::now()),
+                        );
+                    }
 
-            Ok(Json(ApiResponse {
-                success: true,
-                data: Some(data),
-                error: None,
-                processing_time_ms: Some(start_time.elapsed().as_millis() as u64),
-            }))
+                    Ok(Json(ApiResponse {
+                        success: true,
+                        data: Some(processed_data),
+                        error: None,
+                        processing_time_ms: Some(start_time.elapsed().as_millis() as u64),
+                    }))
+                }
+                Err(e) => {
+                    Ok(Json(ApiResponse {
+                        success: false,
+                        data: None,
+                        error: Some(format!("Failed to process historic data: {}", e)),
+                        processing_time_ms: Some(start_time.elapsed().as_millis() as u64),
+                    }))
+                }
+            }
         }
         Err(e) => Ok(Json(ApiResponse {
             success: false,
@@ -805,7 +955,8 @@ pub async fn start_mcx_server(port: u16) -> Result<()> {
     println!("   GET  /api/mcx/option-quote?commodity=COPPER&expiry=23DEC2025&option_type=CE&strike_price=1120.00");
     println!("   POST /api/mcx/batch-analysis (Latest Expiry Only - Processed Data)");
     println!("   GET  /api/mcx/future-symbols");
-    println!("   GET  /api/mcx/historic-data?symbol=COPPER&expiry=23DEC2025&from_date=20251215&to_date=20251219&instrument_name=OPTFUT");
+    println!("   GET  /api/mcx/historic-data?symbol=COPPER&expiry=23DEC2025&from_date=20251215&to_date=20251219&instrument_name=FUTCOM");
+    println!("   GET  /api/mcx/historic-data?symbol=COPPER&expiry=23DEC2025&from_date=20251215&to_date=20251219&instrument_name=OPTFUT&option_type=CE&strike=1120.00");
     println!();
 
     axum::serve(listener, app).await?;

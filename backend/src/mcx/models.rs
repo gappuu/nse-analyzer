@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 // -----------------------------------------------
 // NEW MCX DATA STRUCTURES (from working implementation)
@@ -156,6 +157,93 @@ pub struct McxOptionSummary {
     
     #[serde(rename = "Status")]
     pub status: Option<String>,
+}
+
+// -----------------------------------------------
+// HISTORIC DATA STRUCTURES
+// -----------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HistoricDataResponse {
+    pub d: HistoricDataContainer,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HistoricDataContainer {
+    #[serde(rename = "Data")]
+    pub data: Vec<HistoricRecord>,
+    #[serde(rename = "Summary")]
+    pub summary: HistoricSummary,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HistoricRecord {
+    #[serde(rename = "Close")]
+    pub close: Option<f64>,
+    
+    #[serde(rename = "High")]
+    pub high: Option<f64>,
+    
+    #[serde(rename = "Low")]
+    pub low: Option<f64>,
+    
+    #[serde(rename = "Open")]
+    pub open: Option<f64>,
+    
+    #[serde(rename = "Volume")]
+    pub volume: Option<i64>,
+    
+    #[serde(rename = "Date")]
+    pub date: Option<String>,
+    
+    #[serde(rename = "OptionType")]
+    pub option_type: Option<String>, // "CE", "PE"
+    
+    #[serde(rename = "StrikePrice")]
+    pub strike_price: Option<f64>, // Strike price as number
+    
+    #[serde(rename = "Symbol")]
+    pub symbol: Option<String>,
+    
+    #[serde(rename = "ExpiryDate")]
+    pub expiry_date: Option<String>,
+    
+    #[serde(rename = "LTP")]
+    pub ltp: Option<f64>,
+    
+    #[serde(rename = "Change")]
+    pub change: Option<f64>,
+    
+    #[serde(rename = "ChangePercent")]
+    pub change_percent: Option<f64>,
+    
+    #[serde(rename = "OpenInterest")]
+    pub open_interest: Option<i64>,
+    
+    #[serde(rename = "Turnover")]
+    pub turnover: Option<f64>,
+    
+    // Use a HashMap to capture any additional fields that might be present
+    #[serde(flatten)]
+    pub additional_fields: HashMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HistoricSummary {
+    #[serde(rename = "AsOn")]
+    pub as_on: String, // Will be converted from /Date()/ format to ISO timestamp
+    
+    #[serde(rename = "Count")]
+    pub count: Option<i32>,
+    
+    #[serde(rename = "Status")]
+    pub status: Option<String>,
+    
+    #[serde(rename = "TotalRecords")]
+    pub total_records: Option<i32>,
+    
+    #[serde(rename = "FilteredRecords")]
+    pub filtered_records: Option<i32>,
 }
 
 // -----------------------------------------------
@@ -320,4 +408,30 @@ pub struct OptionChainPayload {
     
     #[serde(rename = "Expiry")]
     pub expiry: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HistoricDataPayload {
+    #[serde(rename = "Symbol")]
+    pub symbol: String,
+    
+    #[serde(rename = "Expiry")]
+    pub expiry: String,
+    
+    #[serde(rename = "FromDate")]
+    pub from_date: String,
+    
+    #[serde(rename = "ToDate")]
+    pub to_date: String,
+    
+    #[serde(rename = "InstrumentName")]
+    pub instrument_name: String,
+    
+    #[serde(rename = "OptionType")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub option_type: Option<String>,
+    
+    #[serde(rename = "Strike")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub strike: Option<String>,
 }
