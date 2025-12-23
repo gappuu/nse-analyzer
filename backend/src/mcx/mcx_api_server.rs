@@ -16,6 +16,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use tower_http::cors::CorsLayer;
+use chrono::NaiveDate;
 
 // -----------------------------------------------
 // API REQUEST/RESPONSE MODELS
@@ -94,6 +95,31 @@ pub struct BatchResult {
     pub error: Option<String>,
 }
 
+// New structs for future symbols integration
+#[derive(Debug, Deserialize)]
+pub struct FutureSymbolsResponse {
+    #[serde(rename = "InstrumentName")]
+    pub instrument_name: String,
+    #[serde(rename = "Products")]
+    pub products: Vec<ProductData>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ProductData {
+    #[serde(rename = "Product")]
+    pub product: String,
+    #[serde(rename = "ExpiryDates")]
+    pub expiry_dates: Vec<String>,
+}
+
+// Enhanced response structure to include latest expiry
+#[derive(Debug, Serialize)]
+pub struct EnhancedSingleAnalysisResponse {
+    #[serde(flatten)]
+    pub analysis: processor::McxSingleAnalysisResponse,
+    pub latest_future_expiry: Option<String>,
+}
+
 // -----------------------------------------------
 // APPLICATION STATE
 // -----------------------------------------------
@@ -123,6 +149,27 @@ impl AppState {
             cache: Arc::new(RwLock::new(Cache::default())),
         })
     }
+}
+
+// -----------------------------------------------
+// HELPER FUNCTIONS
+// -----------------------------------------------
+
+// Helper function to parse date from "DD-MMM-YYYY" format
+fn parse_expiry_date(date_str: &str) -> Option<NaiveDate> {
+    // Parse format like "24-Feb-2026"
+    NaiveDate::parse_from_str(date_str, "%d-%b-%Y").ok()
+}
+
+// Helper function to find the earliest expiry date from a list
+fn find_earliest_expiry(expiry_dates: &[String]) -> Option<String> {
+    expiry_dates
+        .iter()
+        .filter_map(|date_str| {
+            parse_expiry_date(date_str).map(|date| (date, date_str.clone()))
+        })
+        .min_by_key(|(date, _)| *date)
+        .map(|(_, date_str)| date_str)
 }
 
 // -----------------------------------------------
@@ -184,11 +231,39 @@ async fn get_ticker_list(State(app_state): State<AppState>) -> Result<Json<ApiRe
 async fn get_option_chain(
     Query(query): Query<OptionChainQuery>,
     State(app_state): State<AppState>,
-) -> Result<Json<ApiResponse<processor::McxSingleAnalysisResponse>>, StatusCode> {
+) -> Result<Json<ApiResponse<EnhancedSingleAnalysisResponse>>, StatusCode> {
     let start_time = Instant::now();
     let cache_key = format!("{}_{}", query.commodity, query.expiry);
 
-    // Check cache first
+    // Step 1: Fetch future symbols to get latest expiry date
+    let latest_future_expiry = match app_state.client.fetch_future_symbols().await {
+        Ok(symbols_data) => {
+            // Process the symbols data to find matching commodity
+            match processor::process_mcx_future_symbols(symbols_data) {
+                Ok(processed_symbols) => {
+                    // Parse the processed symbols to find matching product
+                    if let Ok(future_symbols) = serde_json::from_value::<FutureSymbolsResponse>(processed_symbols) {
+                        // Find the product that matches our commodity
+                        let matching_product = future_symbols.products
+                            .iter()
+                            .find(|p| p.product.to_uppercase() == query.commodity.to_uppercase());
+                        
+                        if let Some(product) = matching_product {
+                            find_earliest_expiry(&product.expiry_dates)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                }
+                Err(_) => None,
+            }
+        }
+        Err(_) => None,
+    };
+
+    // Step 2: Check cache for option chain (existing logic)
     {
         let cache = app_state.cache.read().await;
         if let Some((option_chain, cached_at)) = cache.option_chains.get(&cache_key) {
@@ -205,7 +280,7 @@ async fn get_option_chain(
                     &query.expiry,
                 ) {
                     Ok((processed_data, spread, days_to_expiry, ce_oi, pe_oi)) => {
-                        let response = processor::create_single_analysis_response(
+                        let analysis_response = processor::create_single_analysis_response(
                             query.commodity.clone(),
                             option_chain.d.summary.as_on.clone().unwrap_or_else(|| "".to_string()),
                             underlying_value,
@@ -216,9 +291,14 @@ async fn get_option_chain(
                             pe_oi,
                         );
                         
+                        let enhanced_response = EnhancedSingleAnalysisResponse {
+                            analysis: analysis_response,
+                            latest_future_expiry: latest_future_expiry.clone(),
+                        };
+                        
                         return Ok(Json(ApiResponse {
                             success: true,
-                            data: Some(response),
+                            data: Some(enhanced_response),
                             error: None,
                             processing_time_ms: Some(start_time.elapsed().as_millis() as u64),
                         }));
@@ -236,7 +316,7 @@ async fn get_option_chain(
         }
     }
 
-    // Fetch from API
+    // Step 3: Fetch from API (existing logic)
     match app_state.client.fetch_option_chain(&query.commodity, &query.expiry).await {
         Ok(option_chain) => {
             // Update cache
@@ -260,7 +340,7 @@ async fn get_option_chain(
                 &query.expiry,
             ) {
                 Ok((processed_data, spread, days_to_expiry, ce_oi, pe_oi)) => {
-                    let response = processor::create_single_analysis_response(
+                    let analysis_response = processor::create_single_analysis_response(
                         query.commodity.clone(),
                         option_chain.d.summary.as_on.clone().unwrap_or_else(|| "".to_string()),
                         underlying_value,
@@ -271,9 +351,14 @@ async fn get_option_chain(
                         pe_oi,
                     );
                     
+                    let enhanced_response = EnhancedSingleAnalysisResponse {
+                        analysis: analysis_response,
+                        latest_future_expiry,
+                    };
+                    
                     Ok(Json(ApiResponse {
                         success: true,
-                        data: Some(response),
+                        data: Some(enhanced_response),
                         error: None,
                         processing_time_ms: Some(start_time.elapsed().as_millis() as u64),
                     }))
@@ -714,7 +799,7 @@ pub async fn start_mcx_server(port: u16) -> Result<()> {
     println!("📋 Available MCX endpoints:");
     println!("   GET  /mcx_health");
     println!("   GET  /api/mcx/tickers");
-    println!("   GET  /api/mcx/option-chain?commodity=COPPER&expiry=23DEC2025 (Processed Data)");
+    println!("   GET  /api/mcx/option-chain?commodity=COPPER&expiry=23DEC2025 (Processed Data + Latest Expiry)");
     println!("   GET  /api/mcx/future-quote?commodity=ALUMINI&expiry=31DEC2025");
     println!("   GET  /api/mcx/option-quote?commodity=COPPER&expiry=23DEC2025&option_type=CE&strike_price=1120.00");
     println!("   POST /api/mcx/batch-analysis (Latest Expiry Only - Processed Data)");
