@@ -845,7 +845,7 @@ function CommodityPageContent() {
                                   onClick={handleFuturesClick}
                                   title="Click to view historical data"
                                 >
-                                  <Activity className="w-4 h-4" />
+                                  {/* <Activity className="w-4 h-4" /> */}
                                   FUTURES
                                   {latestFuturesData && (
                                     <span className="text-l">
@@ -953,7 +953,7 @@ function CommodityPageContent() {
                                         onClick={() => handleOptionClick('CE', option.strikePrice)}
                                         title="Click to view historical data">
                                       <div className="flex items-center gap-1">
-                                        <Activity className="w-3 h-3" />
+                                        {/* <Activity className="w-3 h-3" /> */}
                                         {option.CE?.the_money || '-'}
                                       </div>
                                     </td>
@@ -991,7 +991,7 @@ function CommodityPageContent() {
                                         onClick={() => handleOptionClick('PE', option.strikePrice)}
                                         title="Click to view historical data">
                                       <div className="flex items-center gap-1">
-                                        <Activity className="w-3 h-3" />
+                                        {/* <Activity className="w-3 h-3" /> */}
                                         {option.PE?.the_money || '-'}
                                       </div>
                                     </td>
