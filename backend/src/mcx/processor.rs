@@ -499,12 +499,21 @@ pub fn get_max_oi(opt: &ProcessedMcxOptionData) -> f64 {
 pub fn process_mcx_tickers(tickers: Vec<super::models::Ticker>) -> serde_json::Value {
     // Group by SymbolValue and collect expiry dates
     let mut symbols: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+    let today = Local::now().date_naive();
     
     for ticker in tickers {
-        let formatted_date = convert_mcx_expiry_format(&ticker.expiry_date);
-        symbols.entry(ticker.symbol_value.clone())
-            .or_insert_with(Vec::new)
-            .push(formatted_date);
+        // Parse the expiry date to check if it's not expired
+        if let Ok(expiry_date) = NaiveDate::parse_from_str(&ticker.expiry_date, "%d%b%Y") {
+            // Skip if expiry date is less than today's date
+            if expiry_date < today {
+                continue;
+            }
+            
+            let formatted_date = convert_mcx_expiry_format(&ticker.expiry_date);
+            symbols.entry(ticker.symbol_value.clone())
+                .or_insert_with(Vec::new)
+                .push(formatted_date);
+        }
     }
     
     // Sort expiry dates for each symbol and remove duplicates
@@ -706,4 +715,3 @@ pub fn enrich_mcx_future_quote(quote: &mut Value) {
         }
     }
 }
-
