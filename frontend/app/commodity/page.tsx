@@ -1204,6 +1204,13 @@ function CommodityPageContent() {
           dataType={historicalModal.dataType}
           optionType={historicalModal.optionType}
           strikePrice={historicalModal.strikePrice}
+          latestFuturesData={latestFuturesData}
+          latestOptionData={historicalModal.dataType === 'options' && historicalModal.optionType && historicalModal.strikePrice ? 
+            analysisData?.data.processed_data.find(option => 
+              option.strikePrice === historicalModal.strikePrice
+            )?.[historicalModal.optionType] : undefined
+          }
+          optionsTimestamp={analysisData?.data.timestamp}
         />
       </div>
     </div>

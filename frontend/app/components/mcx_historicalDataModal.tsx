@@ -24,6 +24,9 @@ interface McxHistoricalDataModalProps {
   dataType: 'futures' | 'options';
   optionType?: 'CE' | 'PE';
   strikePrice?: number;
+  latestFuturesData?: any; // Latest futures data from parent component
+  latestOptionData?: any; // Latest option data (CE or PE) from parent component
+  optionsTimestamp?: string; // Timestamp from options analysis data
 }
 
 interface HistoricalDataPoint {
@@ -77,7 +80,10 @@ export default function McxHistoricalDataModal({
   expiry,
   dataType,
   optionType,
-  strikePrice
+  strikePrice,
+  latestFuturesData,
+  latestOptionData,
+  optionsTimestamp
 }: McxHistoricalDataModalProps) {
   const [historicalData, setHistoricalData] = useState<HistoricalDataPoint[]>([]);
   const [loading, setLoading] = useState(false);
@@ -260,6 +266,62 @@ export default function McxHistoricalDataModal({
               value: item.Value
             };
           });
+
+          // Append latest futures data if available and this is futures data
+          if (dataType === 'futures' && latestFuturesData?.timestamp) {
+            const latestDataPoint: HistoricalDataPoint = {
+              DateDisplay: latestFuturesData.timestamp.split(' ')[0], // Extract date part only
+              OpenInterest: latestFuturesData.openInterest,
+              ChangeInOI: latestFuturesData.changeinOpenInterest,
+              Close: latestFuturesData.LTP || latestFuturesData.lastPrice,
+              PreviousClose: latestFuturesData.previousClose,
+              timestamp: latestFuturesData.timestamp,
+              formattedDate: latestFuturesData.timestamp.split(' ')[0],
+              priceChange: latestFuturesData.absoluteChange,
+              high: latestFuturesData.LTP || latestFuturesData.lastPrice, // Use LTP as high for latest data
+              low: latestFuturesData.LTP || latestFuturesData.lastPrice, // Use LTP as low for latest data
+              open: latestFuturesData.LTP || latestFuturesData.lastPrice, // Use LTP as open for latest data
+              volume: 0, // Not available in latest data
+              value: 0 // Not available in latest data
+            };
+            
+            // Check if this date is not already in the historical data
+            const existingDate = processedData.find(item => 
+              item.DateDisplay === latestDataPoint.DateDisplay
+            );
+            
+            if (!existingDate) {
+              processedData.unshift(latestDataPoint); // Add to beginning (most recent)
+            }
+          }
+
+          // Append latest option data if available and this is options data
+          if (dataType === 'options' && latestOptionData && optionsTimestamp) {
+            const latestDataPoint: HistoricalDataPoint = {
+              DateDisplay: optionsTimestamp.split(' ')[0], // Extract date part only
+              OpenInterest: latestOptionData.openInterest || 0,
+              ChangeInOI: latestOptionData.changeinOpenInterest || 0,
+              Close: latestOptionData.lastPrice || 0,
+              PreviousClose: latestOptionData.lastPrice ? (latestOptionData.lastPrice - (latestOptionData.change || 0)) : 0,
+              timestamp: optionsTimestamp,
+              formattedDate: optionsTimestamp.split(' ')[0],
+              priceChange: latestOptionData.change || 0,
+              high: latestOptionData.lastPrice || 0, // Use lastPrice as high for latest data
+              low: latestOptionData.lastPrice || 0, // Use lastPrice as low for latest data
+              open: latestOptionData.lastPrice || 0, // Use lastPrice as open for latest data
+              volume: 0, // Not available in latest data
+              value: 0 // Not available in latest data
+            };
+            
+            // Check if this date is not already in the historical data
+            const existingDate = processedData.find(item => 
+              item.DateDisplay === latestDataPoint.DateDisplay
+            );
+            
+            if (!existingDate) {
+              processedData.unshift(latestDataPoint); // Add to beginning (most recent)
+            }
+          }
           
           // Sort by timestamp (most recent first for table, but will be reversed for chart)
           processedData.sort((a, b) => {
@@ -283,7 +345,7 @@ export default function McxHistoricalDataModal({
     if (isOpen && symbol && expiry) {
       fetchHistoricalData();
     }
-  }, [isOpen, symbol, expiry, dataType, optionType, strikePrice]);
+  }, [isOpen, symbol, expiry, dataType, optionType, strikePrice, latestFuturesData, latestOptionData, optionsTimestamp]);
 
   if (!isOpen) return null;
 
@@ -585,7 +647,7 @@ export default function McxHistoricalDataModal({
 
                     {/* Chart Insights */}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
-                      <div className="bg-slate-800/40 rounded-lg p-4 border border-slate-700/50">
+                      {/* <div className="bg-slate-800/40 rounded-lg p-4 border border-slate-700/50">
                         <h4 className="text-sm font-semibold text-gray-300 mb-2">Open Interest Trend</h4>
                         <div className="flex items-center gap-2">
                           {displayData.length > 1 && (
@@ -625,7 +687,7 @@ export default function McxHistoricalDataModal({
                             </>
                           )}
                         </div>
-                      </div>
+                      </div> */}
 
                       <div className="bg-slate-800/40 rounded-lg p-4 border border-slate-700/50">
                         <h4 className="text-sm font-semibold text-gray-300 mb-2">Data Points</h4>
@@ -645,7 +707,7 @@ export default function McxHistoricalDataModal({
                       <p className="text-sm text-gray-400 mb-1">Total Records</p>
                       <p className="text-xl font-bold text-gray-100">{historicalData.length}</p>
                     </div>
-                    <div className="bg-slate-800/50 rounded-lg p-4">
+                    {/* <div className="bg-slate-800/50 rounded-lg p-4">
                       <p className="text-sm text-gray-400 mb-1">Avg OI</p>
                       <p className="text-xl font-bold text-gray-100">
                         {formatNumber(historicalData.reduce((sum, d) => sum + d.OpenInterest, 0) / historicalData.length)}
@@ -668,7 +730,7 @@ export default function McxHistoricalDataModal({
                       <p className={`text-xl font-bold ${getChangeColor(historicalData.reduce((sum, d) => sum + d.priceChange, 0))}`}>
                         ₹{formatNumber(Math.abs(historicalData.reduce((sum, d) => sum + d.priceChange, 0) / historicalData.length))}
                       </p>
-                    </div>
+                    </div> */}
                   </div>
                 )}
               </>
