@@ -1,17 +1,18 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
-import {
-  X,
-  Clock,
-  TrendingUp,
-  // TrendingDown,
-  Activity,
-  Loader2,
-  AlertCircle,
-  BarChart,
-  // Minus
-} from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, Loader2, TrendingUp, TrendingDown, BarChart3, Table2, ZoomIn } from 'lucide-react';
+import { 
+  LineChart, 
+  Line, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  ResponsiveContainer,
+  ReferenceArea,
+  Brush
+} from 'recharts';
 import { mcxApiClient, getMcxCommodityIcon, handleMcxApiError } from '@/app/lib/api_mcx';
 import { McxHistoricalDataParams } from '@/app/types/api_mcx_type';
 
@@ -26,22 +27,48 @@ interface McxHistoricalDataModalProps {
 }
 
 interface HistoricalDataPoint {
+  DateDisplay: string;
+  OpenInterest: number;
+  ChangeInOI: number;
+  Close: number;
+  PreviousClose: number;
   timestamp: string;
-  underlyingValue: number;
-  openInterest: number;
-  changeInOI: number;
-  settlePrice: number;
-  strikePrice?: number;
-  optionType?: string;
   formattedDate: string;
-  formattedTime: string;
+  priceChange: number;
   high: number;
   low: number;
   open: number;
   volume: number;
   value: number;
-  previousClose: number;
 }
+
+type ViewType = 'table' | 'chart';
+
+// Custom tooltip component defined outside render
+const CustomTooltip = ({ active, payload, label }: any) => {
+  const formatNumber = (value: number): string => {
+    return value.toLocaleString('en-IN', { maximumFractionDigits: 2 });
+  };
+
+  if (active && payload && payload.length) {
+    const uniquePayload = Array.from(
+      new Map(payload.map((item: any) => [item.name, item])).values()
+    );
+    return (
+      <div className="bg-slate-800 border border-gray-600 rounded-lg p-3 shadow-lg">
+        <p className="text-gray-200 font-medium mb-2">{`Date: ${label}`}</p>
+        {uniquePayload.map((entry: any, index: number) => (
+          <p key={index} style={{ color: entry.color }} className="text-sm">
+            {entry.name === 'openInterest' ? 'Open Interest' : 'Close Price'}:
+            {entry.name === 'settlePrice' ? ' ₹' : ' '}
+            {formatNumber(entry.value)}
+          </p>
+        ))}
+      </div>
+    );
+  }
+  return null;
+};
 
 export default function McxHistoricalDataModal({
   isOpen,
@@ -55,6 +82,10 @@ export default function McxHistoricalDataModal({
   const [historicalData, setHistoricalData] = useState<HistoricalDataPoint[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [activeView, setActiveView] = useState<ViewType>('table');
+  const [refAreaLeft, setRefAreaLeft] = useState<string>('');
+  const [refAreaRight, setRefAreaRight] = useState<string>('');
+  const [dataRange, setDataRange] = useState<{ left?: string; right?: string }>({});
 
   // Helper functions for date formatting
   const formatDateForAPI = (date: Date): string => {
@@ -80,495 +111,575 @@ export default function McxHistoricalDataModal({
     }
   };
 
-  const formatTimestamp = (dateString: string) => {
-    try {
-      // Parse date format like "12/22/2025"
-      const [month, day, year] = dateString.split('/');
-      const date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
-      
-      return {
-        formattedDate: date.toLocaleDateString('en-IN'),
-        formattedTime: date.toLocaleTimeString('en-IN', { 
-          hour: '2-digit', 
-          minute: '2-digit' 
-        })
-      };
-    } catch {
-      return {
-        formattedDate: 'Invalid Date',
-        formattedTime: 'Invalid Time'
-      };
-    }
+  const formatNumber = (value: number): string => {
+    return value.toLocaleString('en-IN', { maximumFractionDigits: 2 });
   };
 
-  // Calculate change in OI from current and previous day data
-  const calculateChangeInOI = (data: any[], currentIndex: number): number => {
-    if (currentIndex >= data.length - 1) return 0;
-    const current = data[currentIndex];
-    const previous = data[currentIndex + 1];
-    return current.OpenInterest - previous.OpenInterest;
+  const getChangeColor = (value: number): string => {
+    if (value > 0) return 'text-green-400';
+    if (value < 0) return 'text-red-400';
+    return 'text-gray-400';
   };
 
-  // Fetch historical data with corrected API response handling
-  const fetchHistoricalData = async () => {
-    if (!symbol || !expiry) return;
+
+
+  // Format data for chart - sorted by date from oldest to latest
+  const chartData = historicalData?.map(item => ({
+    date: new Date(item.timestamp).toLocaleDateString('en-IN', { 
+      day: '2-digit', 
+      month: 'short' 
+    }),
+    openInterest: item.OpenInterest,
+    settlePrice: item.Close,
+    fullDate: item.timestamp,
+    sortDate: new Date(item.timestamp).getTime()
+  })).sort((a, b) => a.sortDate - b.sortDate) || [];
+
+  // Filter data based on zoom selection
+  const getDisplayData = () => {
+    if (!dataRange.left && !dataRange.right) return chartData;
     
-    try {
-      setLoading(true);
-      setError(null);
-      
-      // Calculate date range (20 days back)
-      const toDate = new Date();
-      const fromDate = new Date();
-      fromDate.setDate(toDate.getDate() - 20);
-      
-      // Format expiry for API
-      const formattedExpiry = formatExpiryForAPI(expiry);
-      
-      // Build API parameters with new required fields
-      const params: McxHistoricalDataParams = {
-        symbol,
-        expiry: formattedExpiry,
-        from_date: formatDateForAPI(fromDate),
-        to_date: formatDateForAPI(toDate),
-        instrument_name: dataType === 'futures' ? 'FUTCOM' : 'OPTFUT'
-      };
+    const leftIndex = dataRange.left ? chartData.findIndex(d => d.date === dataRange.left) : 0;
+    const rightIndex = dataRange.right ? chartData.findIndex(d => d.date === dataRange.right) : chartData.length - 1;
+    
+    return chartData.slice(leftIndex, rightIndex + 1);
+  };
 
-      // Add option-specific parameters if it's an option
-      if (dataType === 'options') {
-        if (!optionType || strikePrice === undefined) {
-          setError('Option type and strike price are required for options data');
-          return;
-        }
-        params.option_type = optionType;
-        params.strike_price = strikePrice.toString();
-      }
+  const displayData = getDisplayData();
 
-      // console.log('Fetching historical data with params:', params);
-      
-      const response = await mcxApiClient.getHistoricalData(params);
-      
-      if (response.success && response.data) {
-        // Access the correct data structure: response.data.d.Data
-        const rawData = response.data.d.Data;
-        
-        if (!rawData || !Array.isArray(rawData)) {
-          setError('Invalid data format received from API');
-          return;
-        }
+  // Calculate dynamic Y-axis domains
+  const getYAxisDomains = () => {
+    if (displayData.length === 0) return { oiDomain: [0, 100], priceDomain: [0, 100] };
+    
+    const oiValues = displayData.map(d => d.openInterest);
+    const priceValues = displayData.map(d => d.settlePrice);
+    
+    const oiMin = Math.min(...oiValues);
+    const oiMax = Math.max(...oiValues);
+    const oiPadding = (oiMax - oiMin) * 0.1;
+    
+    const priceMin = Math.min(...priceValues);
+    const priceMax = Math.max(...priceValues);
+    const pricePadding = (priceMax - priceMin) * 0.1;
+    
+    return {
+      oiDomain: [Math.max(0, oiMin - oiPadding), oiMax + oiPadding],
+      priceDomain: [priceMin - pricePadding, priceMax + pricePadding]
+    };
+  };
 
-        const processedData: HistoricalDataPoint[] = rawData.map((item, index) => {
-          const timeFormatting = formatTimestamp(item.Date);
-          const changeInOI = calculateChangeInOI(rawData, index);
-          
-          return {
-            timestamp: item.Date,
-            underlyingValue: item.Close,
-            openInterest: item.OpenInterest,
-            changeInOI: changeInOI,
-            settlePrice: item.Close,
-            strikePrice: item.StrikePrice > 0 ? item.StrikePrice : undefined,
-            optionType: item.OptionType !== '-' ? item.OptionType : undefined,
-            formattedDate: timeFormatting.formattedDate,
-            formattedTime: timeFormatting.formattedTime,
-            high: item.High,
-            low: item.Low,
-            open: item.Open,
-            volume: item.Volume,
-            value: item.Value,
-            previousClose: item.PreviousClose
-          };
-        });
-        
-        // Sort by timestamp (most recent first)
-        processedData.sort((a, b) => {
-          const dateA = new Date(a.timestamp);
-          const dateB = new Date(b.timestamp);
-          return dateB.getTime() - dateA.getTime();
-        });
-        
-        setHistoricalData(processedData);
-      } else {
-        setError(response.error || 'Failed to fetch historical data');
-      }
-    } catch (err) {
-      setError(handleMcxApiError(err));
-      console.error('Error fetching historical data:', err);
-    } finally {
-      setLoading(false);
+  const { oiDomain, priceDomain } = getYAxisDomains();
+
+  const zoom = () => {
+    if (refAreaLeft === refAreaRight || refAreaRight === '') {
+      setRefAreaLeft('');
+      setRefAreaRight('');
+      return;
     }
+
+    // Make sure left is before right
+    const left = refAreaLeft < refAreaRight ? refAreaLeft : refAreaRight;
+    const right = refAreaLeft < refAreaRight ? refAreaRight : refAreaLeft;
+
+    setDataRange({ left, right });
+    setRefAreaLeft('');
+    setRefAreaRight('');
+  };
+
+  const zoomOut = () => {
+    setDataRange({});
+    setRefAreaLeft('');
+    setRefAreaRight('');
   };
 
   // Fetch data when modal opens or parameters change
   useEffect(() => {
+    // Fetch historical data
+    const fetchHistoricalData = async () => {
+      if (!symbol || !expiry) return;
+      
+      try {
+        setLoading(true);
+        setError(null);
+        
+        // Calculate date range (20 days back)
+        const toDate = new Date();
+        const fromDate = new Date();
+        fromDate.setDate(toDate.getDate() - 20);
+        
+        // Format expiry for API
+        const formattedExpiry = formatExpiryForAPI(expiry);
+        
+        // Build API parameters
+        const params: McxHistoricalDataParams = {
+          symbol,
+          expiry: formattedExpiry,
+          from_date: formatDateForAPI(fromDate),
+          to_date: formatDateForAPI(toDate),
+          instrument_name: dataType === 'futures' ? 'FUTCOM' : 'OPTFUT'
+        };
+
+        // Add option-specific parameters if it's an option
+        if (dataType === 'options') {
+          if (!optionType || strikePrice === undefined) {
+            setError('Option type and strike price are required for options data');
+            return;
+          }
+          params.option_type = optionType;
+          params.strike_price = strikePrice.toString();
+        }
+
+        console.log('Fetching historical data with params:', params);
+        
+        const response = await mcxApiClient.getHistoricalData(params);
+        
+        if (response.success && response.data) {
+          const rawData = response.data.d.Data;
+          
+          if (!rawData || !Array.isArray(rawData)) {
+            setError('Invalid data format received from API');
+            return;
+          }
+
+          const processedData: HistoricalDataPoint[] = rawData.map((item) => {
+            const priceChange = item.Close - item.PreviousClose;
+            
+            return {
+              DateDisplay: item.DateDisplay,
+              OpenInterest: item.OpenInterest,
+              ChangeInOI: item.ChangeInOI, // Now comes from backend
+              Close: item.Close,
+              PreviousClose: item.PreviousClose,
+              timestamp: item.Date,
+              formattedDate: item.DateDisplay,
+              priceChange: priceChange,
+              high: item.High,
+              low: item.Low,
+              open: item.Open,
+              volume: item.Volume,
+              value: item.Value
+            };
+          });
+          
+          // Sort by timestamp (most recent first for table, but will be reversed for chart)
+          processedData.sort((a, b) => {
+            const dateA = new Date(a.timestamp);
+            const dateB = new Date(b.timestamp);
+            return dateB.getTime() - dateA.getTime();
+          });
+          
+          setHistoricalData(processedData);
+        } else {
+          setError(response.error || 'Failed to fetch historical data');
+        }
+      } catch (err) {
+        setError(handleMcxApiError(err));
+        console.error('Error fetching historical data:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
     if (isOpen && symbol && expiry) {
       fetchHistoricalData();
     }
   }, [isOpen, symbol, expiry, dataType, optionType, strikePrice]);
 
-  // Calculate summary statistics
-  const summaryStats = useMemo(() => {
-    if (historicalData.length === 0) {
-      return {
-        priceChange: 0,
-        priceChangePercent: 0,
-        oiChange: 0,
-        oiChangePercent: 0,
-        avgPrice: 0,
-        avgOI: 0,
-        latest: null,
-        oldest: null
-      };
-    }
-
-    const latest = historicalData[0];
-    const oldest = historicalData[historicalData.length - 1];
-    
-    const priceChange = latest.settlePrice - oldest.settlePrice;
-    const priceChangePercent = oldest.settlePrice ? ((priceChange / oldest.settlePrice) * 100) : 0;
-    
-    const oiChange = latest.openInterest - oldest.openInterest;
-    const oiChangePercent = oldest.openInterest ? ((oiChange / oldest.openInterest) * 100) : 0;
-
-    const avgPrice = historicalData.reduce((sum, item) => sum + item.settlePrice, 0) / historicalData.length;
-    const avgOI = historicalData.reduce((sum, item) => sum + item.openInterest, 0) / historicalData.length;
-
-    return {
-      priceChange,
-      priceChangePercent,
-      oiChange,
-      oiChangePercent,
-      avgPrice,
-      avgOI,
-      latest,
-      oldest
-    };
-  }, [historicalData]);
-
-  // Create mini chart data
-  const createMiniChart = (values: number[], type: 'price' | 'oi') => {
-    if (values.length === 0) return [];
-    
-    const max = Math.max(...values);
-    const min = Math.min(...values);
-    const range = max - min;
-    
-    return values.reverse().map((value, index) => {
-      const normalizedHeight = range > 0 ? ((value - min) / range) * 100 : 50;
-      const isIncreasing = index === 0 ? false : value >= values[index - 1];
-      
-      return {
-        height: normalizedHeight,
-        color: type === 'price' 
-          ? (isIncreasing ? '#10b981' : '#ef4444')
-          : (isIncreasing ? '#3b82f6' : '#f59e0b')
-      };
-    });
-  };
-
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className="fixed inset-0 z-50 overflow-y-auto">
       {/* Backdrop */}
       <div 
-        className="absolute inset-0 bg-black bg-opacity-50"
+        className="fixed inset-0 bg-black/70 backdrop-blur-sm transition-opacity"
         onClick={onClose}
       />
-      
-      {/* Modal */}
-      <div className="relative bg-slate-900 rounded-lg shadow-2xl w-full max-w-7xl max-h-[90vh] overflow-hidden mx-4">
-        {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-gray-700">
-          <div className="flex items-center gap-4">
-            <span className="text-2xl">{getMcxCommodityIcon(symbol)}</span>
-            <div>
-              <h2 className="text-xl font-bold text-gray-100">
-                {symbol} Historical Data
-              </h2>
-              <p className="text-sm text-gray-400 mt-1">
-                {dataType === 'futures' ? (
-                  `Futures Contract - ${expiry}`
-                ) : (
-                  `${optionType} Option - Strike ₹${strikePrice} - ${expiry}`
-                )}
-              </p>
-              <p className="text-xs text-gray-500 mt-1">
-                Last 20 days data • Instrument: {dataType === 'futures' ? 'FUTCOM' : 'OPTFUT'}
-              </p>
-            </div>
-          </div>
-          
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-200 transition-colors p-2"
-          >
-            <X className="w-6 h-6" />
-          </button>
-        </div>
 
-        {/* Content */}
-        <div className="p-6 overflow-y-auto max-h-[calc(90vh-100px)]">
-          {loading ? (
-            <div className="flex items-center justify-center py-12">
-              <div className="text-center">
-                <Loader2 className="w-8 h-8 animate-spin mx-auto text-nse-accent mb-4" />
-                <p className="text-gray-400">Loading historical data...</p>
-                <p className="text-xs text-gray-500 mt-2">
-                  Fetching {dataType} data for {symbol} ({expiry})
-                  {dataType === 'options' && ` - ${optionType} ${strikePrice}`}
-                </p>
+      {/* Modal */}
+      <div className="flex min-h-full items-center justify-center p-4">
+        <div className="relative w-full max-w-7xl bg-slate-900 rounded-xl shadow-2xl border border-gray-700/50">
+          {/* Header */}
+          <div className="flex items-center justify-between p-6 border-b border-gray-700/50">
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-4">
+                <span className="text-2xl">{getMcxCommodityIcon(symbol)}</span>
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-100">
+                    {symbol} Historical Data
+                  </h2>
+                  <p className="text-sm text-gray-400 mt-1">
+                    {dataType === 'futures' ? (
+                      `Futures Contract - ${expiry}`
+                    ) : (
+                      `${optionType} Option - Strike ₹${strikePrice} - ${expiry}`
+                    )}
+                  </p>
+                </div>
               </div>
-            </div>
-          ) : error ? (
-            <div className="flex items-center justify-center py-12">
-              <div className="text-center max-w-md">
-                <AlertCircle className="w-12 h-12 text-red-400 mx-auto mb-4" />
-                <h3 className="text-lg font-semibold text-gray-100 mb-2">Error Loading Data</h3>
-                <p className="text-gray-400 mb-4">{error}</p>
+              
+              {/* View Toggle Tabs */}
+              <div className="flex bg-slate-800 rounded-lg p-1 ml-8">
                 <button
-                  onClick={fetchHistoricalData}
-                  className="btn-primary"
+                  onClick={() => setActiveView('table')}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${
+                    activeView === 'table'
+                      ? 'bg-nse-accent text-white shadow-sm'
+                      : 'text-gray-400 hover:text-gray-300'
+                  }`}
                 >
-                  Try Again
+                  <Table2 className="w-4 h-4" />
+                  Table View
+                </button>
+                <button
+                  onClick={() => setActiveView('chart')}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${
+                    activeView === 'chart'
+                      ? 'bg-nse-accent text-white shadow-sm'
+                      : 'text-gray-400 hover:text-gray-300'
+                  }`}
+                >
+                  <BarChart3 className="w-4 h-4" />
+                  Chart View
                 </button>
               </div>
             </div>
-          ) : historicalData.length === 0 ? (
-            <div className="flex items-center justify-center py-12">
-              <div className="text-center">
-                <BarChart className="w-12 h-12 text-gray-500 mx-auto mb-4" />
-                <h3 className="text-lg font-semibold text-gray-300 mb-2">No Data Available</h3>
-                <p className="text-gray-500">
-                  No historical data found for the specified parameters
-                </p>
-              </div>
-            </div>
-          ) : (
-            <>
-              {/* Summary Cards */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-                <div className="card-glow rounded-lg p-6">
-                  <div className="flex items-center gap-3 mb-2">
-                    <TrendingUp className="w-5 h-5 text-nse-accent" />
-                    <span className="text-sm text-gray-400">Latest Price</span>
-                  </div>
-                  <p className="text-2xl font-bold text-gray-100">
-                    ₹{summaryStats.latest?.settlePrice.toFixed(2)}
-                  </p>
-                  <p className={`text-sm mt-1 ${summaryStats.priceChange >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                    {summaryStats.priceChange >= 0 ? '+' : ''}₹{summaryStats.priceChange.toFixed(2)} 
-                    ({summaryStats.priceChangePercent >= 0 ? '+' : ''}{summaryStats.priceChangePercent.toFixed(2)}%)
-                  </p>
-                </div>
-
-                <div className="card-glow rounded-lg p-6">
-                  <div className="flex items-center gap-3 mb-2">
-                    <BarChart className="w-5 h-5 text-blue-400" />
-                    <span className="text-sm text-gray-400">Open Interest</span>
-                  </div>
-                  <p className="text-2xl font-bold text-gray-100">
-                    {summaryStats.latest?.openInterest.toLocaleString('en-IN')}
-                  </p>
-                  <p className={`text-sm mt-1 ${summaryStats.oiChange >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                    {summaryStats.oiChange >= 0 ? '+' : ''}{summaryStats.oiChange.toLocaleString('en-IN')} 
-                    ({summaryStats.oiChangePercent >= 0 ? '+' : ''}{summaryStats.oiChangePercent.toFixed(2)}%)
-                  </p>
-                </div>
-
-                <div className="card-glow rounded-lg p-6">
-                  <div className="flex items-center gap-3 mb-2">
-                    <Activity className="w-5 h-5 text-purple-400" />
-                    <span className="text-sm text-gray-400">Average Price</span>
-                  </div>
-                  <p className="text-2xl font-bold text-gray-100">
-                    ₹{summaryStats.avgPrice.toFixed(2)}
-                  </p>
-                  <p className="text-sm text-gray-500 mt-1">20-day average</p>
-                </div>
-
-                <div className="card-glow rounded-lg p-6">
-                  <div className="flex items-center gap-3 mb-2">
-                    <BarChart className="w-5 h-5 text-orange-400" />
-                    <span className="text-sm text-gray-400">Average OI</span>
-                  </div>
-                  <p className="text-2xl font-bold text-gray-100">
-                    {summaryStats.avgOI.toLocaleString('en-IN')}
-                  </p>
-                  <p className="text-sm text-gray-500 mt-1">20-day average</p>
-                </div>
-              </div>
-
-              {/* Mini Charts */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-                <div className="card-glow rounded-lg p-6">
-                  <h3 className="text-lg font-semibold text-gray-100 mb-4 flex items-center gap-2">
-                    <TrendingUp className="w-5 h-5" />
-                    Price Trend (₹)
-                  </h3>
-                  <div className="flex items-end gap-1 h-20">
-                    {createMiniChart(historicalData.map(d => d.settlePrice), 'price').map((bar, index) => (
-                      <div
-                        key={index}
-                        className="flex-1 rounded-t transition-all hover:opacity-80"
-                        style={{
-                          height: `${bar.height}%`,
-                          backgroundColor: bar.color,
-                          minHeight: '4px'
-                        }}
-                      />
-                    ))}
-                  </div>
-                </div>
-
-                <div className="card-glow rounded-lg p-6">
-                  <h3 className="text-lg font-semibold text-gray-100 mb-4 flex items-center gap-2">
-                    <BarChart className="w-5 h-5" />
-                    Open Interest Trend
-                  </h3>
-                  <div className="flex items-end gap-1 h-20">
-                    {createMiniChart(historicalData.map(d => d.openInterest), 'oi').map((bar, index) => (
-                      <div
-                        key={index}
-                        className="flex-1 rounded-t transition-all hover:opacity-80"
-                        style={{
-                          height: `${bar.height}%`,
-                          backgroundColor: bar.color,
-                          minHeight: '4px'
-                        }}
-                      />
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {/* Data Table */}
-              <div className="card-glow rounded-lg overflow-hidden">
-                <div className="p-6 border-b border-gray-700">
-                  <h3 className="text-lg font-semibold text-gray-100 flex items-center gap-2">
-                    <Clock className="w-5 h-5" />
-                    Historical Data ({historicalData.length} records)
-                  </h3>
-                </div>
-                
-                <div className="overflow-x-auto">
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>Date</th>
-                        <th>Open</th>
-                        <th>High</th>
-                        <th>Low</th>
-                        <th>Close</th>
-                        <th>Open Interest</th>
-                        <th>Change in OI</th>
-                        <th>Volume</th>
-                        {dataType === 'options' && (
-                          <>
-                            <th>Strike Price</th>
-                            <th>Option Type</th>
-                          </>
-                        )}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {historicalData.map((item, index) => (
-                        <tr key={index}>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <span className="text-sm font-medium text-gray-100">
-                              {item.formattedDate}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <span className="text-sm text-gray-300">
-                              ₹{item.open.toFixed(2)}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <span className="text-sm font-medium text-green-400">
-                              ₹{item.high.toFixed(2)}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <span className="text-sm font-medium text-red-400">
-                              ₹{item.low.toFixed(2)}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <span className="text-sm font-medium text-gray-100">
-                              ₹{item.settlePrice.toFixed(2)}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <span className="text-sm text-gray-100">
-                              {item.openInterest.toLocaleString('en-IN')}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <span className={`text-sm font-medium ${
-                              item.changeInOI > 0 ? 'text-green-400' : 
-                              item.changeInOI < 0 ? 'text-red-400' : 'text-gray-400'
-                            }`}>
-                              {item.changeInOI > 0 ? '+' : ''}{item.changeInOI.toLocaleString('en-IN')}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <span className="text-sm text-gray-100">
-                              {item.volume.toLocaleString('en-IN')}
-                            </span>
-                          </td>
-                          {dataType === 'options' && (
-                            <>
-                              <td className="px-6 py-4 whitespace-nowrap">
-                                <span className="text-sm text-gray-100">
-                                  {item.strikePrice ? `₹${item.strikePrice}` : '-'}
-                                </span>
-                              </td>
-                              <td className="px-6 py-4 whitespace-nowrap">
-                                <span className={`text-sm font-medium ${
-                                  item.optionType === 'CE' ? 'text-green-400' : 
-                                  item.optionType === 'PE' ? 'text-red-400' : 'text-gray-400'
-                                }`}>
-                                  {item.optionType || '-'}
-                                </span>
-                              </td>
-                            </>
-                          )}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div className="flex justify-between items-center p-6 border-t border-gray-700 bg-slate-800/50">
-          <div className="flex items-center gap-2 text-sm text-gray-400">
-            <Clock className="w-4 h-4" />
-            Data refreshed automatically
-            <span className="text-xs text-gray-500 ml-2">
-              • Instrument: {dataType === 'futures' ? 'FUTCOM' : 'OPTFUT'}
-            </span>
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={fetchHistoricalData}
-              disabled={loading}
-              className="btn-secondary inline-flex items-center text-sm"
-            >
-              {loading ? (
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-              ) : (
-                <Activity className="w-4 h-4 mr-2" />
-              )}
-              {loading ? 'Refreshing...' : 'Refresh Data'}
-            </button>
+            
             <button
               onClick={onClose}
-              className="btn-outline-primary text-sm"
+              className="p-2 hover:bg-slate-800 rounded-lg transition-colors"
+            >
+              <X className="w-6 h-6 text-gray-400" />
+            </button>
+          </div>
+
+          {/* Content */}
+          <div className="p-6">
+            {loading && (
+              <div className="flex flex-col items-center justify-center py-12">
+                <Loader2 className="w-12 h-12 animate-spin text-nse-accent mb-4" />
+                <p className="text-gray-400">Loading historical data...</p>
+              </div>
+            )}
+
+            {error && (
+              <div className="bg-red-900/20 border border-red-500/50 rounded-lg p-4 text-red-300">
+                <p className="font-medium">Error loading data</p>
+                <p className="text-sm mt-1">{error}</p>
+              </div>
+            )}
+
+            {!loading && !error && historicalData && historicalData.length === 0 && (
+              <div className="text-center py-12">
+                <p className="text-gray-400 text-lg">No historical data available for the selected period</p>
+              </div>
+            )}
+
+            {!loading && !error && historicalData && historicalData.length > 0 && (
+              <>
+                {/* Table View */}
+                {activeView === 'table' && (
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b border-gray-700">
+                          <th className="px-4 py-3 text-left text-sm font-semibold text-gray-300">Date</th>
+                          <th className="px-4 py-3 text-right text-sm font-semibold text-gray-300">Open Interest</th>
+                          <th className="px-4 py-3 text-right text-sm font-semibold text-gray-300">Change in OI</th>
+                          <th className="px-4 py-3 text-right text-sm font-semibold text-gray-300">Settle Price</th>
+                          <th className="px-4 py-3 text-right text-sm font-semibold text-gray-300">Price Change</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {historicalData.map((row, index) => (
+                          <tr 
+                            key={index} 
+                            className="border-b border-gray-700/50 hover:bg-slate-800/50 transition-colors"
+                          >
+                            <td className="px-4 py-3 text-sm text-gray-300">
+                              {row.DateDisplay}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-right text-gray-100">
+                              {formatNumber(row.OpenInterest)}
+                            </td>
+                            <td className={`px-4 py-3 text-sm text-right font-medium ${getChangeColor(row.ChangeInOI)}`}>
+                              <div className="flex items-center justify-end gap-1">
+                                {row.ChangeInOI > 0 && <TrendingUp className="w-4 h-4" />}
+                                {row.ChangeInOI < 0 && <TrendingDown className="w-4 h-4" />}
+                                {row.ChangeInOI > 0 ? '+' : ''}
+                                {formatNumber(row.ChangeInOI)}
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 text-sm text-right text-gray-100">
+                              ₹{formatNumber(row.Close)}
+                            </td>
+                            <td className={`px-4 py-3 text-sm text-right font-medium ${getChangeColor(row.priceChange)}`}>
+                              <div className="flex items-center justify-end gap-1">
+                                {row.priceChange > 0 && <TrendingUp className="w-4 h-4" />}
+                                {row.priceChange < 0 && <TrendingDown className="w-4 h-4" />}
+                                {row.priceChange > 0 ? '+' : ''}
+                                ₹{formatNumber(Math.abs(row.priceChange))}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {/* Chart View */}
+                {activeView === 'chart' && (
+                  <div className="space-y-6">
+                    {/* Chart Controls */}
+                    <div className="flex items-center justify-between p-4 bg-slate-800/30 rounded-lg">
+                      <div className="flex items-center gap-6">
+                        <div className="flex items-center gap-2">
+                          <div className="w-4 h-0.5 bg-blue-400"></div>
+                          <span className="text-sm text-gray-300">Open Interest</span>
+                          <span className="text-xs text-gray-500">(Left Axis)</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-4 h-0.5 bg-emerald-400"></div>
+                          <span className="text-sm text-gray-300">Close Price</span>
+                          <span className="text-xs text-gray-500">(Right Axis)</span>
+                        </div>
+                      </div>
+                      
+                      {/* Zoom Controls */}
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-400">Click and drag to zoom</span>
+                        {(dataRange.left || dataRange.right) && (
+                          <button
+                            onClick={zoomOut}
+                            className="flex items-center gap-1 px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded text-xs text-gray-300 transition-colors"
+                          >
+                            <ZoomIn className="w-3 h-3" />
+                            Reset Zoom
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Chart Container */}
+                    <div className="h-96 w-full bg-slate-800/20 rounded-lg p-4">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart 
+                          data={displayData} 
+                          margin={{ top: 20, right: 60, left: 60, bottom: 20 }}
+                          onMouseDown={(e) => {
+                            if (e && e.activeLabel) {
+                              setRefAreaLeft(String(e.activeLabel));
+                            }
+                          }}
+                          onMouseMove={(e) => {
+                            if (refAreaLeft && e && e.activeLabel) {
+                              setRefAreaRight(String(e.activeLabel));
+                            }
+                          }}
+                          onMouseUp={zoom}
+                        >
+                          <CartesianGrid 
+                            strokeDasharray="3 3" 
+                            stroke="#374151" 
+                            opacity={0.3}
+                          />
+                          <XAxis 
+                            dataKey="date" 
+                            axisLine={false}
+                            tickLine={false}
+                            tick={{ fontSize: 12, fill: '#9CA3AF' }}
+                            angle={-45}
+                            textAnchor="end"
+                            height={60}
+                          />
+                          <YAxis 
+                            yAxisId="left"
+                            orientation="left"
+                            axisLine={false}
+                            tickLine={false}
+                            tick={{ fontSize: 12, fill: '#60A5FA' }}
+                            tickFormatter={(value) => formatNumber(value)}
+                            domain={oiDomain}
+                          />
+                          <YAxis 
+                            yAxisId="right"
+                            orientation="right"
+                            axisLine={false}
+                            tickLine={false}
+                            tick={{ fontSize: 12, fill: '#34D399' }}
+                            tickFormatter={(value) => `₹${formatNumber(value)}`}
+                            domain={priceDomain}
+                          />
+                          <Tooltip content={CustomTooltip} />
+                          
+                          {/* Reference Area for Zoom Selection */}
+                          {refAreaLeft && refAreaRight && (
+                            <ReferenceArea 
+                              yAxisId="left" 
+                              x1={refAreaLeft} 
+                              x2={refAreaRight} 
+                              strokeOpacity={0.3} 
+                              fillOpacity={0.3}
+                              fill="#8884d8"
+                            />
+                          )}
+                          
+                          <Line 
+                            yAxisId="left"
+                            type="monotone" 
+                            dataKey="openInterest" 
+                            stroke="#60A5FA"
+                            strokeWidth={2.5}
+                            dot={{ fill: '#60A5FA', strokeWidth: 0, r: 3 }}
+                            activeDot={{ r: 5, stroke: '#60A5FA', strokeWidth: 2, fill: '#1E293B' }}
+                          />
+                          <Line 
+                            yAxisId="right"
+                            type="monotone" 
+                            dataKey="settlePrice" 
+                            stroke="#34D399"
+                            strokeWidth={2.5}
+                            dot={{ fill: '#34D399', strokeWidth: 0, r: 3 }}
+                            activeDot={{ r: 5, stroke: '#34D399', strokeWidth: 2, fill: '#1E293B' }}
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+
+                    {/* Brush for Timeline Navigation */}
+                    {chartData.length > 20 && (
+                      <div className="h-16 w-full bg-slate-800/10 rounded-lg p-2">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={chartData}>
+                            <XAxis 
+                              dataKey="date" 
+                              axisLine={false}
+                              tickLine={false}
+                              tick={false}
+                            />
+                            <Line 
+                              type="monotone" 
+                              dataKey="settlePrice" 
+                              stroke="#34D399"
+                              strokeWidth={1}
+                              dot={false}
+                            />
+                            <Brush 
+                              dataKey="date"
+                              height={30}
+                              stroke="#60A5FA"
+                              fill="#1E293B"
+                              onChange={(brushData) => {
+                                if (brushData && chartData[brushData.startIndex] && chartData[brushData.endIndex]) {
+                                  setDataRange({
+                                    left: chartData[brushData.startIndex].date,
+                                    right: chartData[brushData.endIndex].date
+                                  });
+                                }
+                              }}
+                            />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    )}
+
+                    {/* Chart Insights */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
+                      <div className="bg-slate-800/40 rounded-lg p-4 border border-slate-700/50">
+                        <h4 className="text-sm font-semibold text-gray-300 mb-2">Open Interest Trend</h4>
+                        <div className="flex items-center gap-2">
+                          {displayData.length > 1 && (
+                            <>
+                              {displayData[displayData.length - 1].openInterest > displayData[0].openInterest ? (
+                                <>
+                                  <TrendingUp className="w-4 h-4 text-green-400" />
+                                  <span className="text-green-400 text-sm font-medium">Increasing</span>
+                                </>
+                              ) : (
+                                <>
+                                  <TrendingDown className="w-4 h-4 text-red-400" />
+                                  <span className="text-red-400 text-sm font-medium">Decreasing</span>
+                                </>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      </div>
+                      
+                      <div className="bg-slate-800/40 rounded-lg p-4 border border-slate-700/50">
+                        <h4 className="text-sm font-semibold text-gray-300 mb-2">Price Trend</h4>
+                        <div className="flex items-center gap-2">
+                          {displayData.length > 1 && (
+                            <>
+                              {displayData[displayData.length - 1].settlePrice > displayData[0].settlePrice ? (
+                                <>
+                                  <TrendingUp className="w-4 h-4 text-green-400" />
+                                  <span className="text-green-400 text-sm font-medium">Increasing</span>
+                                </>
+                              ) : (
+                                <>
+                                  <TrendingDown className="w-4 h-4 text-red-400" />
+                                  <span className="text-red-400 text-sm font-medium">Decreasing</span>
+                                </>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="bg-slate-800/40 rounded-lg p-4 border border-slate-700/50">
+                        <h4 className="text-sm font-semibold text-gray-300 mb-2">Data Points</h4>
+                        <div className="flex items-center gap-2">
+                          <span className="text-nse-accent text-xl font-bold">{displayData.length}</span>
+                          <span className="text-gray-400 text-sm">records</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Summary Stats - Only show in table view */}
+                {activeView === 'table' && (
+                  <div className="mt-6 grid grid-cols-2 md:grid-cols-5 gap-4">
+                    <div className="bg-slate-800/50 rounded-lg p-4">
+                      <p className="text-sm text-gray-400 mb-1">Total Records</p>
+                      <p className="text-xl font-bold text-gray-100">{historicalData.length}</p>
+                    </div>
+                    <div className="bg-slate-800/50 rounded-lg p-4">
+                      <p className="text-sm text-gray-400 mb-1">Avg OI</p>
+                      <p className="text-xl font-bold text-gray-100">
+                        {formatNumber(historicalData.reduce((sum, d) => sum + d.OpenInterest, 0) / historicalData.length)}
+                      </p>
+                    </div>
+                    <div className="bg-slate-800/50 rounded-lg p-4">
+                      <p className="text-sm text-gray-400 mb-1">Total OI Change</p>
+                      <p className={`text-xl font-bold ${getChangeColor(historicalData.reduce((sum, d) => sum + d.ChangeInOI, 0))}`}>
+                        {formatNumber(historicalData.reduce((sum, d) => sum + d.ChangeInOI, 0))}
+                      </p>
+                    </div>
+                    <div className="bg-slate-800/50 rounded-lg p-4">
+                      <p className="text-sm text-gray-400 mb-1">Avg Close Price</p>
+                      <p className="text-xl font-bold text-gray-100">
+                        ₹{formatNumber(historicalData.reduce((sum, d) => sum + d.Close, 0) / historicalData.length)}
+                      </p>
+                    </div>
+                    <div className="bg-slate-800/50 rounded-lg p-4">
+                      <p className="text-sm text-gray-400 mb-1">Avg Price Change</p>
+                      <p className={`text-xl font-bold ${getChangeColor(historicalData.reduce((sum, d) => sum + d.priceChange, 0))}`}>
+                        ₹{formatNumber(Math.abs(historicalData.reduce((sum, d) => sum + d.priceChange, 0) / historicalData.length))}
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* Footer */}
+          <div className="flex items-center justify-end gap-3 p-6 border-t border-gray-700">
+            <button
+              onClick={onClose}
+              className="px-6 py-2 bg-slate-700 hover:bg-slate-600 text-gray-100 rounded-lg transition-colors font-medium"
             >
               Close
             </button>

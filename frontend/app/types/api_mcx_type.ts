@@ -220,6 +220,7 @@ export interface McxHistoricalDataParams {
 export interface McxHistoricalDataResponse {
   d: {
     Data: Array<{
+      ChangeInOI:number;
       Close: number;
       Date: string;
       DateDisplay: string;
