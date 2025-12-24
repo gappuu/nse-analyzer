@@ -641,6 +641,111 @@ pub fn create_single_analysis_response(
     }
 }
 
+// Helper function to process historic data response
+pub fn process_historic_data_response(
+    mut data: serde_json::Value,
+    option_type: &Option<String>,
+    strike: &Option<String>,
+) -> Result<serde_json::Value, String> {
+    // Convert AsOn timestamp
+    if let Some(as_on) = data.pointer_mut("/d/Summary/AsOn") {
+        if let Some(as_on_str) = as_on.as_str() {
+             let converted = convert_mcx_timestamp(as_on_str);
+            *as_on = serde_json::Value::String(converted);
+        }
+    }
+
+    // Filter data if option_type and strike are provided
+    if let (Some(opt_type), Some(strike_val)) = (option_type, strike) {
+        let mut filtered_count = 0;
+        
+        // First, filter the records and count them
+        if let Some(records) = data.pointer_mut("/d/Data") {
+            if let Some(records_array) = records.as_array_mut() {
+                records_array.retain(|record| {
+                    let record_opt_type = record.get("OptionType")
+                        .and_then(|v| v.as_str());
+                    let record_strike = record.get("StrikePrice")
+                        .and_then(|v| v.as_f64());
+                    
+                    let should_keep = match (record_opt_type, record_strike) {
+                        (Some(r_opt_type), Some(r_strike)) => {
+                            // Parse the strike_val string to f64 for comparison
+                            if let Ok(strike_price) = strike_val.parse::<f64>() {
+                                r_opt_type.eq_ignore_ascii_case(opt_type) && 
+                                (r_strike - strike_price).abs() < 0.01 // Use float comparison with tolerance
+                            } else {
+                                false
+                            }
+                        }
+                        _ => false,
+                    };
+                    
+                    if should_keep {
+                        filtered_count += 1;
+                    }
+                    should_keep
+                });
+            }
+        }
+        
+        // Then update the count in summary
+        if let Some(summary) = data.pointer_mut("/d/Summary/Count") {
+            *summary = serde_json::Value::Number(
+                serde_json::Number::from(filtered_count)
+            );
+        }
+    }
+
+    // Calculate "change in OI" for all records
+    if let Some(records) = data.pointer_mut("/d/Data") {
+        if let Some(records_array) = records.as_array_mut() {
+            // Sort records by date in chronological order
+            records_array.sort_by(|a, b| {
+                let date_a = a.get("Date").and_then(|v| v.as_str()).unwrap_or("");
+                let date_b = b.get("Date").and_then(|v| v.as_str()).unwrap_or("");
+                date_a.cmp(date_b)
+            });
+
+            // Calculate change in OI for each record (starting from day 1)
+            for i in 0..records_array.len() {
+                if i == 0 {
+                    // Day 0 (baseline) - change in OI is 0 or null
+                    if let Some(record) = records_array[i].as_object_mut() {
+                        record.insert("ChangeInOI".to_string(), serde_json::Value::Null);
+                    }
+                } else {
+                    // Calculate change from previous day
+                    let current_oi = records_array[i]
+                        .get("OpenInterest")
+                        .and_then(|v| v.as_f64());
+                    let previous_oi = records_array[i - 1]
+                        .get("OpenInterest")
+                        .and_then(|v| v.as_f64());
+
+                    let change_in_oi = match (current_oi, previous_oi) {
+                        (Some(current), Some(previous)) => {
+                            serde_json::Value::Number(
+                                serde_json::Number::from_f64(current - previous)
+                                    .unwrap_or(serde_json::Number::from(0))
+                            )
+                        }
+                        _ => serde_json::Value::Null,
+                    };
+
+                    if let Some(record) = records_array[i].as_object_mut() {
+                        record.insert("ChangeInOI".to_string(), change_in_oi);
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(data)
+}
+
+
+
 // in mcx_api_server::get_future_quote enhance the quote data json
 pub fn enrich_mcx_future_quote(quote: &mut Value) {
     // ---- Fix Summary.AsOn ----
