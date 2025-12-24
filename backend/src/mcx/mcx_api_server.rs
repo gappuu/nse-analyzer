@@ -279,6 +279,50 @@ fn process_historic_data_response(
         }
     }
 
+    // Calculate "change in OI" for all records
+    if let Some(records) = data.pointer_mut("/d/Data") {
+        if let Some(records_array) = records.as_array_mut() {
+            // Sort records by date in chronological order
+            records_array.sort_by(|a, b| {
+                let date_a = a.get("Date").and_then(|v| v.as_str()).unwrap_or("");
+                let date_b = b.get("Date").and_then(|v| v.as_str()).unwrap_or("");
+                date_a.cmp(date_b)
+            });
+
+            // Calculate change in OI for each record (starting from day 1)
+            for i in 0..records_array.len() {
+                if i == 0 {
+                    // Day 0 (baseline) - change in OI is 0 or null
+                    if let Some(record) = records_array[i].as_object_mut() {
+                        record.insert("ChangeInOI".to_string(), serde_json::Value::Null);
+                    }
+                } else {
+                    // Calculate change from previous day
+                    let current_oi = records_array[i]
+                        .get("OpenInterest")
+                        .and_then(|v| v.as_f64());
+                    let previous_oi = records_array[i - 1]
+                        .get("OpenInterest")
+                        .and_then(|v| v.as_f64());
+
+                    let change_in_oi = match (current_oi, previous_oi) {
+                        (Some(current), Some(previous)) => {
+                            serde_json::Value::Number(
+                                serde_json::Number::from_f64(current - previous)
+                                    .unwrap_or(serde_json::Number::from(0))
+                            )
+                        }
+                        _ => serde_json::Value::Null,
+                    };
+
+                    if let Some(record) = records_array[i].as_object_mut() {
+                        record.insert("ChangeInOI".to_string(), change_in_oi);
+                    }
+                }
+            }
+        }
+    }
+
     Ok(data)
 }
 
