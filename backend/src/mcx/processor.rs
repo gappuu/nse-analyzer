@@ -712,7 +712,8 @@ pub fn process_historic_data_response(
                 if i == 0 {
                     // Day 0 (baseline) - change in OI is 0 or null
                     if let Some(record) = records_array[i].as_object_mut() {
-                        record.insert("ChangeInOI".to_string(), serde_json::Value::Null);
+                        // record.insert("ChangeInOI".to_string(), serde_json::Value::Null);
+                        record.insert("ChangeInOI".to_string(), serde_json::Value::Number(serde_json::Number::from(0)));
                     }
                 } else {
                     // Calculate change from previous day
