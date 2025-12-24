@@ -17,6 +17,8 @@ import {
   RefreshCw,
   Database,
   Eye,
+  ChevronDown,
+  X,
   // TrendingUp
 } from 'lucide-react';
 import { 
@@ -35,12 +37,103 @@ import {
   Alert
 } from '@/app/types/api_mcx_type';
 
+// Multi-select dropdown component
+function MultiSelectDropdown({ 
+  label, 
+  options, 
+  selectedValues, 
+  onChange, 
+  placeholder 
+}: {
+  label: string;
+  options: string[];
+  selectedValues: string[];
+  onChange: (values: string[]) => void;
+  placeholder: string;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+
+  const toggleOption = (value: string) => {
+    if (selectedValues.includes(value)) {
+      onChange(selectedValues.filter(v => v !== value));
+    } else {
+      onChange([...selectedValues, value]);
+    }
+  };
+
+  const removeAll = () => {
+    onChange([]);
+  };
+
+  const displayText = selectedValues.length === 0 
+    ? placeholder 
+    : selectedValues.length === 1 
+      ? selectedValues[0].replace(/_/g, ' ')
+      : `${selectedValues.length} selected`;
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-full bg-slate-800 border border-gray-600 rounded-lg px-4 py-3 text-left text-gray-100 
+                 focus:border-nse-accent focus:ring-2 focus:ring-nse-accent/20 transition-colors
+                 flex items-center justify-between min-w-[200px]"
+      >
+        <span className={selectedValues.length === 0 ? 'text-gray-400' : 'text-gray-100'}>
+          {displayText}
+        </span>
+        <ChevronDown className={`w-4 h-4 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
+
+      {isOpen && (
+        <>
+          <div 
+            className="fixed inset-0 z-[9998]" 
+            onClick={() => setIsOpen(false)}
+          />
+          <div className="absolute top-full left-0 right-0 mt-1 bg-slate-800 border border-gray-600 rounded-lg shadow-2xl z-[9999] max-h-60 overflow-auto">
+            <div className="p-2">
+              <div className="text-xs text-gray-400 px-2 py-1 mb-1">{label}</div>
+              
+              {selectedValues.length > 0 && (
+                <button
+                  onClick={removeAll}
+                  className="w-full text-left px-3 py-2 text-sm text-red-400 hover:bg-slate-700 rounded flex items-center"
+                >
+                  <X className="w-3 h-3 mr-2" />
+                  Clear all
+                </button>
+              )}
+              
+              {options.map((option) => (
+                <button
+                  key={option}
+                  onClick={() => toggleOption(option)}
+                  className="w-full text-left px-3 py-2 text-sm text-gray-100 hover:bg-slate-700 rounded flex items-center justify-between"
+                >
+                  <span>{option.replace(/_/g, ' ')}</span>
+                  {selectedValues.includes(option) && (
+                    <CheckCircle className="w-4 h-4 text-nse-accent" />
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function McxBatchAnalysisPage() {
   const [batchData, setBatchData] = useState<McxDataWithAge<McxBatchAnalysisResponse> | null>(null);
   const [loading, setLoading] = useState(true);
   const [newAnalysisLoading, setNewAnalysisLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [filterAlertType, setFilterAlertType] = useState<string>('all');
+  const [filterAlertTypes, setFilterAlertTypes] = useState<string[]>([]);
+  const [filterPositions, setFilterPositions] = useState<string[]>([]);
+  const [filterOptionTypes, setFilterOptionTypes] = useState<string[]>([]);
   const [searchSymbol, setSearchSymbol] = useState('');
   const [hasExistingData, setHasExistingData] = useState(false);
 
@@ -138,27 +231,60 @@ export default function McxBatchAnalysisPage() {
       );
     }
 
-    // Filter by alert type
-    if (filterAlertType !== 'all') {
-      filtered = filtered.filter(result =>
-        result.alerts.some(alert => alert.alert_type === filterAlertType)
-      );
+    // Apply multi-select filters
+    if (filterAlertTypes.length > 0 || filterPositions.length > 0 || filterOptionTypes.length > 0) {
+      filtered = filtered.filter(result => {
+        // Check if result has alerts matching all active filters
+        const hasMatchingAlert = result.alerts.some(alert => {
+          let matches = true;
+
+          // Alert type filter
+          if (filterAlertTypes.length > 0) {
+            matches = matches && filterAlertTypes.includes(alert.alert_type);
+          }
+
+          // Position filter
+          if (filterPositions.length > 0) {
+            matches = matches && (alert.values.the_money ? filterPositions.includes(alert.values.the_money) : false);
+          }
+
+          // Option type filter
+          if (filterOptionTypes.length > 0) {
+            matches = matches && filterOptionTypes.includes(alert.option_type);
+          }
+
+          return matches;
+        });
+
+        return hasMatchingAlert;
+      });
     }
 
     return filtered;
-  }, [batchData, searchSymbol, filterAlertType]);
+  }, [batchData, searchSymbol, filterAlertTypes, filterPositions, filterOptionTypes]);
 
-  const alertTypes = React.useMemo(() => {
-    if (!batchData) return [];
+  const filterOptions = React.useMemo(() => {
+    if (!batchData) return { alertTypes: [], positions: [], optionTypes: [] };
 
-    const types = new Set<string>();
+    const alertTypes = new Set<string>();
+    const positions = new Set<string>();
+    const optionTypes = new Set<string>();
+
     batchData.data.rules_output.forEach(result => {
       result.alerts.forEach(alert => {
-        types.add(alert.alert_type);
+        alertTypes.add(alert.alert_type);
+        if (alert.values.the_money) {
+          positions.add(alert.values.the_money);
+        }
+        optionTypes.add(alert.option_type);
       });
     });
 
-    return Array.from(types);
+    return {
+      alertTypes: Array.from(alertTypes).sort(),
+      positions: Array.from(positions).sort(),
+      optionTypes: Array.from(optionTypes).sort(),
+    };
   }, [batchData]);
 
   const downloadResults = () => {
@@ -174,6 +300,15 @@ export default function McxBatchAnalysisPage() {
     linkElement.setAttribute('download', exportFileDefaultName);
     linkElement.click();
   };
+
+  const clearAllFilters = () => {
+    setFilterAlertTypes([]);
+    setFilterPositions([]);
+    setFilterOptionTypes([]);
+    setSearchSymbol('');
+  };
+
+  const hasActiveFilters = searchSymbol || filterAlertTypes.length > 0 || filterPositions.length > 0 || filterOptionTypes.length > 0;
 
   return (
     <div className="min-h-screen py-8 px-4">
@@ -396,12 +531,26 @@ export default function McxBatchAnalysisPage() {
               </div>
             </div>
 
-            {/* Filter Controls */}
+            {/* Enhanced Filter Controls */}
             {batchData.data.rules_output.length > 0 && (
-              <div className="card-glow rounded-lg p-6">
-                <div className="flex flex-col lg:flex-row gap-4">
+              <div className="card-glow rounded-lg p-6 relative z-40">
+                <div className="flex items-center gap-3 mb-4">
+                  <Filter className="w-5 h-5 text-gray-400" />
+                  <h3 className="text-lg font-semibold text-gray-100">Filter Results</h3>
+                  {hasActiveFilters && (
+                    <button
+                      onClick={clearAllFilters}
+                      className="ml-auto text-sm text-red-400 hover:text-red-300 transition-colors flex items-center gap-1"
+                    >
+                      <X className="w-3 h-3" />
+                      Clear All
+                    </button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-4 mb-4 relative z-50">
                   {/* Search */}
-                  <div className="relative flex-1 max-w-md">
+                  <div className="relative">
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
                     <input
                       type="text"
@@ -414,27 +563,80 @@ export default function McxBatchAnalysisPage() {
                     />
                   </div>
 
-                  {/* Alert Type Filter */}
-                  <div className="flex items-center gap-3">
-                    <Filter className="w-5 h-5 text-gray-400" />
-                    <select
-                      value={filterAlertType}
-                      onChange={(e) => setFilterAlertType(e.target.value)}
-                      className="bg-slate-800 border border-gray-600 rounded-lg px-4 py-3 text-gray-100 
-                               focus:border-nse-accent focus:ring-2 focus:ring-nse-accent/20 transition-colors"
-                    >
-                      <option value="all">All Alert Types</option>
-                      {alertTypes.map(type => (
-                        <option key={type} value={type}>
-                          {type.replace(/_/g, ' ')}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                  {/* Alert Types Multi-Select */}
+                  <MultiSelectDropdown
+                    label="Alert Types"
+                    options={filterOptions.alertTypes}
+                    selectedValues={filterAlertTypes}
+                    onChange={setFilterAlertTypes}
+                    placeholder="All Alert Types"
+                  />
+
+                  {/* Position Multi-Select */}
+                  <MultiSelectDropdown
+                    label="Position"
+                    options={filterOptions.positions}
+                    selectedValues={filterPositions}
+                    onChange={setFilterPositions}
+                    placeholder="All Positions"
+                  />
+
+                  {/* Option Type Multi-Select */}
+                  <MultiSelectDropdown
+                    label="Option Type"
+                    options={filterOptions.optionTypes}
+                    selectedValues={filterOptionTypes}
+                    onChange={setFilterOptionTypes}
+                    placeholder="All Option Types"
+                  />
                 </div>
 
-                <div className="mt-4 flex items-center gap-2 text-sm text-gray-400">
-                  <span>Showing {filteredResults.length} of {batchData.data.rules_output.length} commodities with alerts</span>
+                {/* Filter Summary */}
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  <span className="text-gray-400">
+                    Showing {filteredResults.length} of {batchData.data.rules_output.length} commodities with alerts
+                  </span>
+                  
+                  {/* Active Filter Tags */}
+                  {hasActiveFilters && (
+                    <div className="flex flex-wrap gap-2 ml-2">
+                      {searchSymbol && (
+                        <span className="px-2 py-1 bg-blue-600/20 text-blue-300 rounded text-xs flex items-center gap-1">
+                          Search: &quot;{searchSymbol}&quot;
+                          <button onClick={() => setSearchSymbol('')}>
+                            <X className="w-3 h-3" />
+                          </button>
+                        </span>
+                      )}
+                      
+                      {filterAlertTypes.map(type => (
+                        <span key={type} className="px-2 py-1 bg-yellow-600/20 text-yellow-300 rounded text-xs flex items-center gap-1">
+                          Alert: {type.replace(/_/g, ' ')}
+                          <button onClick={() => setFilterAlertTypes(prev => prev.filter(t => t !== type))}>
+                            <X className="w-3 h-3" />
+                          </button>
+                        </span>
+                      ))}
+                      
+                      {filterPositions.map(pos => (
+                        <span key={pos} className="px-2 py-1 bg-green-600/20 text-green-300 rounded text-xs flex items-center gap-1">
+                          Position: {pos}
+                          <button onClick={() => setFilterPositions(prev => prev.filter(p => p !== pos))}>
+                            <X className="w-3 h-3" />
+                          </button>
+                        </span>
+                      ))}
+                      
+                      {filterOptionTypes.map(type => (
+                        <span key={type} className="px-2 py-1 bg-purple-600/20 text-purple-300 rounded text-xs flex items-center gap-1">
+                          Option: {type}
+                          <button onClick={() => setFilterOptionTypes(prev => prev.filter(t => t !== type))}>
+                            <X className="w-3 h-3" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -461,9 +663,15 @@ export default function McxBatchAnalysisPage() {
               <div className="card-glow rounded-lg p-8 text-center">
                 <Search className="w-12 h-12 text-gray-500 mx-auto mb-4" />
                 <h3 className="text-lg font-semibold text-gray-300 mb-2">No Results Found</h3>
-                <p className="text-gray-500">
-                  Try adjusting your search or filter criteria
+                <p className="text-gray-500 mb-4">
+                  No commodities match your current filter criteria.
                 </p>
+                <button
+                  onClick={clearAllFilters}
+                  className="btn-secondary text-sm"
+                >
+                  Clear All Filters
+                </button>
               </div>
             )}
           </div>
@@ -492,7 +700,6 @@ function McxCommodityResultCard({ result }: { result: RulesOutput }) {
             <div className="flex items-center gap-4 text-sm text-gray-400">
               <span>Underlying: ₹{result.underlyingValue.toFixed(2)}</span>
               <span>•</span>
-              
               <span>Updated: {new Date(result.timestamp).toLocaleString()}</span>
             </div>
           </div>
