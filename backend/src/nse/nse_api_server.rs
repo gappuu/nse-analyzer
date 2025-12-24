@@ -533,6 +533,7 @@ pub async fn start_server(port: u16) -> Result<()> {
     println!("   GET  /api/nse/single-analysis?symbol=NIFTY&expiry=30-Dec-2025");
     println!("   GET  /api/nse/futures-data?symbol=NIFTY&expiry=30-Dec-2025");
     println!("   GET  /api/nse/derivatives-historical?symbol=NIFTY&instrument_type=FUTURES&expiry=30-Dec-2025&from_date=06-11-2025&to_date=06-12-2025");
+    println!("   GET  /api/nse/derivatives-historical?symbol=NIFTY&instrument_type=OPTIONS&expiry=30-Dec-2025&from_date=06-11-2025&to_date=06-12-2025&strike_price=18000&option_type=CE");
     println!("   POST /api/nse/batch-analysis");
     println!();
 
