@@ -47,6 +47,27 @@ pub struct McxRulesOutput {
     pub alerts: Vec<McxAlert>,
 }
 
+/// Calculate OI percentage change with infinity handling
+/// Caps at 100,000% to eliminate only infinite cases
+pub fn calculate_safe_oi_percentage_change(pchange_in_oi: f64) -> f64 {
+    if pchange_in_oi.is_infinite() {
+        if pchange_in_oi.is_sign_positive() {
+            100000.0  // Cap positive infinity at 100,000%
+        } else {
+            -100.0   // Cap negative infinity at -100% (complete loss)
+        }
+    } else {
+        pchange_in_oi.min(100000.0).max(-100.0)  // Additional safety cap
+    }
+}
+
+/// Check if this is a new position scenario (infinity case)
+pub fn is_new_position_scenario(pchange_in_oi: f64, current_oi: Option<f64>) -> bool {
+    pchange_in_oi.is_infinite() && 
+    pchange_in_oi.is_sign_positive() && 
+    current_oi.unwrap_or(0.0) > 0.0
+}
+
 /// Run rules on processed MCX option data
 pub fn run_mcx_rules(
     data: &[ProcessedMcxOptionData],
@@ -94,11 +115,11 @@ pub fn run_mcx_rules(
     if alerts.is_empty() {
         return None;
     }
-    let converted_timestamp =super::processor::convert_mcx_timestamp(&timestamp);
+    let converted_timestamp = super::processor::convert_mcx_timestamp(&timestamp);
 
     Some(McxRulesOutput {
         symbol,
-        timestamp : converted_timestamp,
+        timestamp: converted_timestamp,
         underlying_value,
         alerts,
     })
@@ -116,25 +137,26 @@ pub fn check_mcx_option_rules(
     underlying_value: f64,
 ) -> Vec<McxAlert> {
     let mut alerts = Vec::new();
-    let pchange_in_oi = detail.pchange_in_oi.unwrap_or(0.0);
+    let raw_pchange_in_oi = detail.pchange_in_oi.unwrap_or(0.0);
+    let safe_pchange_in_oi = calculate_safe_oi_percentage_change(raw_pchange_in_oi);
     let last_price = detail.last_price;
     let open_interest = detail.open_interest;
     
-    // Rule 1: Huge OI increase (> 1000%)
-    if pchange_in_oi > 1000.0 {
+    // Rule: New Position (Handle infinity cases - Approach 4)
+    if is_new_position_scenario(raw_pchange_in_oi, open_interest) {
         alerts.push(McxAlert {
             symbol: symbol.to_string(),
             strike_price: strike,
             expiry_date: expiry.to_string(),
             option_type: option_type.to_string(),
-            alert_type: "HUGE_OI_INCREASE".to_string(),
+            alert_type: "NEW_POSITION".to_string(),
             description: format!(
-                "{} {} {} strike has massive OI increase of {:.2}% ({} days to expiry)",
-                symbol, option_type, strike, pchange_in_oi, days_to_expiry
+                "{} {} {} strike has new OI of {:.0} contracts ({} days to expiry)",
+                symbol, option_type, strike, open_interest.unwrap_or(0.0), days_to_expiry
             ),
             spread,  
             values: McxAlertValues {
-                pchange_in_oi: Some(pchange_in_oi),
+                pchange_in_oi: None, // Don't include infinity values in JSON output
                 last_price,
                 open_interest,
                 the_money: Some(detail.the_money.clone()),
@@ -144,8 +166,32 @@ pub fn check_mcx_option_rules(
         });
     }
     
-    // Rule 2: Huge OI decrease (< -50%)
-    if pchange_in_oi < -50.0 {
+    // Rule 1: Huge OI increase (> 1000%) - Using safe percentage
+    if safe_pchange_in_oi > 1000.0 && !raw_pchange_in_oi.is_infinite() {
+        alerts.push(McxAlert {
+            symbol: symbol.to_string(),
+            strike_price: strike,
+            expiry_date: expiry.to_string(),
+            option_type: option_type.to_string(),
+            alert_type: "HUGE_OI_INCREASE".to_string(),
+            description: format!(
+                "{} {} {} strike has massive OI increase of {:.2}% ({} days to expiry)",
+                symbol, option_type, strike, safe_pchange_in_oi, days_to_expiry
+            ),
+            spread,  
+            values: McxAlertValues {
+                pchange_in_oi: Some(safe_pchange_in_oi),
+                last_price,
+                open_interest,
+                the_money: Some(detail.the_money.clone()),
+                time_val: detail.time_val,
+                days_to_expiry,
+            },
+        });
+    }
+    
+    // Rule 2: Huge OI decrease (< -50%) - Using safe percentage
+    if safe_pchange_in_oi < -50.0 {
         alerts.push(McxAlert {
             symbol: symbol.to_string(),
             strike_price: strike,
@@ -154,11 +200,11 @@ pub fn check_mcx_option_rules(
             alert_type: "HUGE_OI_DECREASE".to_string(),
             description: format!(
                 "{} {} {} strike has massive OI decrease of {:.2}% ({} days to expiry)",
-                symbol, option_type, strike, pchange_in_oi, days_to_expiry
+                symbol, option_type, strike, safe_pchange_in_oi, days_to_expiry
             ),
             spread,  
             values: McxAlertValues {
-                pchange_in_oi: Some(pchange_in_oi),
+                pchange_in_oi: Some(safe_pchange_in_oi),
                 last_price,
                 open_interest,
                 the_money: Some(detail.the_money.clone()),
@@ -191,7 +237,7 @@ pub fn check_mcx_option_rules(
             ),
             spread,  
             values: McxAlertValues {
-                pchange_in_oi: Some(pchange_in_oi),
+                pchange_in_oi: Some(safe_pchange_in_oi),
                 last_price: Some(last_price.unwrap_or(0.0)),  
                 open_interest,
                 the_money: Some(detail.the_money.clone()),
@@ -208,14 +254,14 @@ pub fn check_mcx_option_rules(
             strike_price: strike,
             expiry_date: expiry.to_string(),
             option_type: option_type.to_string(),
-            alert_type: "NEGATIVE TIME VALUE".to_string(),
+            alert_type: "NEGATIVE_TIME_VALUE".to_string(),
             description: format!(
-                "{} {} {} strike has Negative Time Value of {} ({} days to expiry)",
+                "{} {} {} strike has Negative Time Value of {:.4} ({} days to expiry)",
                 symbol, option_type, strike, tv, days_to_expiry
             ),
             spread,  
             values: McxAlertValues {
-                pchange_in_oi: Some(pchange_in_oi),
+                pchange_in_oi: Some(safe_pchange_in_oi),
                 last_price,
                 open_interest,
                 the_money: Some(detail.the_money.clone()),
