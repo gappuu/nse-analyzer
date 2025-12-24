@@ -144,7 +144,7 @@ export default function McxHistoricalDataModal({
         params.strike_price = strikePrice.toString();
       }
 
-      console.log('Fetching historical data with params:', params);
+      // console.log('Fetching historical data with params:', params);
       
       const response = await mcxApiClient.getHistoricalData(params);
       
@@ -163,7 +163,7 @@ export default function McxHistoricalDataModal({
           
           return {
             timestamp: item.Date,
-            underlyingValue: item.Close, // Using Close as underlying value
+            underlyingValue: item.Close,
             openInterest: item.OpenInterest,
             changeInOI: changeInOI,
             settlePrice: item.Close,
