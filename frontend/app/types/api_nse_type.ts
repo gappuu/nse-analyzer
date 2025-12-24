@@ -15,6 +15,7 @@ export interface ContractInfoResponse {
 }
 
 export interface ProcessedOptionDetail {
+  prevClose: number;
   strikePrice?: number;
   underlyingValue?: number;
   openInterest?: number;
@@ -124,6 +125,7 @@ export interface FuturesDataResponse {
     lastPrice: number;
     openInterest: number;
     changeinOpenInterest: number;
+    prevClose: number;
   }>;
   timestamp: string;
 }
@@ -136,6 +138,7 @@ export interface FuturesAnalysis {
   lastPrice: number;
   openInterest: number;
   changeinOpenInterest: number;
+  prevClose: number;
 }
 
 
@@ -146,4 +149,6 @@ export interface HistoricalDataPoint {
   FH_CHANGE_IN_OI: number;
   FH_SETTLE_PRICE: number;
   FH_MARKET_LOT?: number;
+  FH_CLOSING_PRICE: number;
+  FH_PREV_CLS: number;
 }

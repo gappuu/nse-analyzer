@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { X, Loader2, TrendingUp, TrendingDown, BarChart3, Table2 } from 'lucide-react';
+import { X, Loader2, TrendingUp, TrendingDown, BarChart3, Table2, ZoomIn } from 'lucide-react';
 import { 
   LineChart, 
   Line, 
@@ -9,7 +9,9 @@ import {
   YAxis, 
   CartesianGrid, 
   Tooltip, 
-  ResponsiveContainer 
+  ResponsiveContainer,
+  ReferenceArea,
+  Brush
 } from 'recharts';
 import { HistoricalDataPoint } from '@/app/types/api_nse_type';
 
@@ -31,23 +33,23 @@ const CustomTooltip = ({ active, payload, label }: any) => {
   };
 
   if (active && payload && payload.length) {
-  const uniquePayload = Array.from(
-    new Map(payload.map((item: any) => [item.name, item])).values()
-  );
-  return (
-    <div className="bg-slate-800 border border-gray-600 rounded-lg p-3 shadow-lg">
-      <p className="text-gray-200 font-medium mb-2">{`Date: ${label}`}</p>
-      {uniquePayload.map((entry: any, index: number) => (
-        <p key={index} style={{ color: entry.color }} className="text-sm">
-          {entry.name === 'openInterest' ? 'Open Interest' : 'Settle Price'}:
-          {entry.name === 'settlePrice' ? ' ₹' : ' '}
-          {formatNumber(entry.value)}
-        </p>
-      ))}
-    </div>
-  );
-}
-return null;
+    const uniquePayload = Array.from(
+      new Map(payload.map((item: any) => [item.name, item])).values()
+    );
+    return (
+      <div className="bg-slate-800 border border-gray-600 rounded-lg p-3 shadow-lg">
+        <p className="text-gray-200 font-medium mb-2">{`Date: ${label}`}</p>
+        {uniquePayload.map((entry: any, index: number) => (
+          <p key={index} style={{ color: entry.color }} className="text-sm">
+            {entry.name === 'openInterest' ? 'Open Interest' : 'Settle Price'}:
+            {entry.name === 'settlePrice' ? ' ₹' : ' '}
+            {formatNumber(entry.value)}
+          </p>
+        ))}
+      </div>
+    );
+  }
+  return null;
 };
 
 export default function HistoricalDataModal({
@@ -59,6 +61,9 @@ export default function HistoricalDataModal({
   title
 }: HistoricalDataModalProps) {
   const [activeView, setActiveView] = useState<ViewType>('table');
+  const [refAreaLeft, setRefAreaLeft] = useState<string>('');
+  const [refAreaRight, setRefAreaRight] = useState<string>('');
+  const [dataRange, setDataRange] = useState<{ left?: string; right?: string }>({});
 
   if (!isOpen) return null;
 
@@ -66,23 +71,86 @@ export default function HistoricalDataModal({
     return value.toLocaleString('en-IN', { maximumFractionDigits: 2 });
   };
 
-  const getOIChangeColor = (value: number): string => {
+  const getChangeColor = (value: number): string => {
     if (value > 0) return 'text-green-400';
     if (value < 0) return 'text-red-400';
     return 'text-gray-400';
   };
 
+  // Calculate price change for each data point
+  const dataWithPriceChange = data?.map(item => ({
+    ...item,
+    priceChange: item.FH_CLOSING_PRICE - item.FH_PREV_CLS
+  })) || [];
+
   // Format data for chart - sorted by date from oldest to latest
-  const chartData = data?.map(item => ({
+  const chartData = dataWithPriceChange?.map(item => ({
     date: new Date(item.FH_TIMESTAMP).toLocaleDateString('en-IN', { 
       day: '2-digit', 
       month: 'short' 
     }),
-    openInterest: item.FH_OPEN_INT / (item.FH_MARKET_LOT || 1), // Normalize by market lot
+    openInterest: item.FH_OPEN_INT / (item.FH_MARKET_LOT || 1),
     settlePrice: item.FH_SETTLE_PRICE,
     fullDate: item.FH_TIMESTAMP,
-    sortDate: new Date(item.FH_TIMESTAMP).getTime() // For sorting
+    sortDate: new Date(item.FH_TIMESTAMP).getTime()
   })).sort((a, b) => a.sortDate - b.sortDate) || [];
+
+  // Filter data based on zoom selection
+  const getDisplayData = () => {
+    if (!dataRange.left && !dataRange.right) return chartData;
+    
+    const leftIndex = dataRange.left ? chartData.findIndex(d => d.date === dataRange.left) : 0;
+    const rightIndex = dataRange.right ? chartData.findIndex(d => d.date === dataRange.right) : chartData.length - 1;
+    
+    return chartData.slice(leftIndex, rightIndex + 1);
+  };
+
+  const displayData = getDisplayData();
+
+  // Calculate dynamic Y-axis domains
+  const getYAxisDomains = () => {
+    if (displayData.length === 0) return { oiDomain: [0, 100], priceDomain: [0, 100] };
+    
+    const oiValues = displayData.map(d => d.openInterest);
+    const priceValues = displayData.map(d => d.settlePrice);
+    
+    const oiMin = Math.min(...oiValues);
+    const oiMax = Math.max(...oiValues);
+    const oiPadding = (oiMax - oiMin) * 0.1;
+    
+    const priceMin = Math.min(...priceValues);
+    const priceMax = Math.max(...priceValues);
+    const pricePadding = (priceMax - priceMin) * 0.1;
+    
+    return {
+      oiDomain: [Math.max(0, oiMin - oiPadding), oiMax + oiPadding],
+      priceDomain: [priceMin - pricePadding, priceMax + pricePadding]
+    };
+  };
+
+  const { oiDomain, priceDomain } = getYAxisDomains();
+
+  const zoom = () => {
+    if (refAreaLeft === refAreaRight || refAreaRight === '') {
+      setRefAreaLeft('');
+      setRefAreaRight('');
+      return;
+    }
+
+    // Make sure left is before right
+    const left = refAreaLeft < refAreaRight ? refAreaLeft : refAreaRight;
+    const right = refAreaLeft < refAreaRight ? refAreaRight : refAreaLeft;
+
+    setDataRange({ left, right });
+    setRefAreaLeft('');
+    setRefAreaRight('');
+  };
+
+  const zoomOut = () => {
+    setDataRange({});
+    setRefAreaLeft('');
+    setRefAreaRight('');
+  };
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto">
@@ -172,10 +240,11 @@ export default function HistoricalDataModal({
                           <th className="px-4 py-3 text-right text-sm font-semibold text-gray-300">Open Interest</th>
                           <th className="px-4 py-3 text-right text-sm font-semibold text-gray-300">Change in OI</th>
                           <th className="px-4 py-3 text-right text-sm font-semibold text-gray-300">Settle Price</th>
+                          <th className="px-4 py-3 text-right text-sm font-semibold text-gray-300">Price Change</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {data.map((row, index) => (
+                        {dataWithPriceChange.map((row, index) => (
                           <tr 
                             key={index} 
                             className="border-b border-gray-700/50 hover:bg-slate-800/50 transition-colors"
@@ -189,7 +258,7 @@ export default function HistoricalDataModal({
                             <td className="px-4 py-3 text-sm text-right text-gray-100">
                               {formatNumber(row.FH_OPEN_INT / (row.FH_MARKET_LOT || 1))}
                             </td>
-                            <td className={`px-4 py-3 text-sm text-right font-medium ${getOIChangeColor(row.FH_CHANGE_IN_OI)}`}>
+                            <td className={`px-4 py-3 text-sm text-right font-medium ${getChangeColor(row.FH_CHANGE_IN_OI)}`}>
                               <div className="flex items-center justify-end gap-1">
                                 {row.FH_CHANGE_IN_OI > 0 && <TrendingUp className="w-4 h-4" />}
                                 {row.FH_CHANGE_IN_OI < 0 && <TrendingDown className="w-4 h-4" />}
@@ -199,6 +268,14 @@ export default function HistoricalDataModal({
                             </td>
                             <td className="px-4 py-3 text-sm text-right text-gray-100">
                               ₹{formatNumber(row.FH_SETTLE_PRICE)}
+                            </td>
+                            <td className={`px-4 py-3 text-sm text-right font-medium ${getChangeColor(row.priceChange)}`}>
+                              <div className="flex items-center justify-end gap-1">
+                                {row.priceChange > 0 && <TrendingUp className="w-4 h-4" />}
+                                {row.priceChange < 0 && <TrendingDown className="w-4 h-4" />}
+                                {row.priceChange > 0 ? '+' : ''}
+                                ₹{formatNumber(Math.abs(row.priceChange))}
+                              </div>
                             </td>
                           </tr>
                         ))}
@@ -210,24 +287,54 @@ export default function HistoricalDataModal({
                 {/* Chart View */}
                 {activeView === 'chart' && (
                   <div className="space-y-6">
-                    {/* Chart Legend */}
-                    <div className="flex items-center justify-center gap-6 p-4 bg-slate-800/30 rounded-lg">
-                      <div className="flex items-center gap-2">
-                        <div className="w-4 h-0.5 bg-blue-400"></div>
-                        <span className="text-sm text-gray-300">Open Interest</span>
-                        <span className="text-xs text-gray-500">(Left Axis)</span>
+                    {/* Chart Controls */}
+                    <div className="flex items-center justify-between p-4 bg-slate-800/30 rounded-lg">
+                      <div className="flex items-center gap-6">
+                        <div className="flex items-center gap-2">
+                          <div className="w-4 h-0.5 bg-blue-400"></div>
+                          <span className="text-sm text-gray-300">Open Interest</span>
+                          <span className="text-xs text-gray-500">(Left Axis)</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-4 h-0.5 bg-emerald-400"></div>
+                          <span className="text-sm text-gray-300">Settle Price</span>
+                          <span className="text-xs text-gray-500">(Right Axis)</span>
+                        </div>
                       </div>
+                      
+                      {/* Zoom Controls */}
                       <div className="flex items-center gap-2">
-                        <div className="w-4 h-0.5 bg-emerald-400"></div>
-                        <span className="text-sm text-gray-300">Settle Price</span>
-                        <span className="text-xs text-gray-500">(Right Axis)</span>
+                        <span className="text-xs text-gray-400">Click and drag to zoom</span>
+                        {(dataRange.left || dataRange.right) && (
+                          <button
+                            onClick={zoomOut}
+                            className="flex items-center gap-1 px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded text-xs text-gray-300 transition-colors"
+                          >
+                            <ZoomIn className="w-3 h-3" />
+                            Reset Zoom
+                          </button>
+                        )}
                       </div>
                     </div>
 
                     {/* Chart Container */}
                     <div className="h-96 w-full bg-slate-800/20 rounded-lg p-4">
                       <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={chartData} margin={{ top: 20, right: 60, left: 60, bottom: 20 }}>
+                        <LineChart 
+                          data={displayData} 
+                          margin={{ top: 20, right: 60, left: 60, bottom: 20 }}
+                          onMouseDown={(e) => {
+                            if (e && e.activeLabel) {
+                              setRefAreaLeft(String(e.activeLabel));
+                            }
+                          }}
+                          onMouseMove={(e) => {
+                            if (refAreaLeft && e && e.activeLabel) {
+                              setRefAreaRight(String(e.activeLabel));
+                            }
+                          }}
+                          onMouseUp={zoom}
+                        >
                           <CartesianGrid 
                             strokeDasharray="3 3" 
                             stroke="#374151" 
@@ -249,6 +356,7 @@ export default function HistoricalDataModal({
                             tickLine={false}
                             tick={{ fontSize: 12, fill: '#60A5FA' }}
                             tickFormatter={(value) => formatNumber(value)}
+                            domain={oiDomain}
                           />
                           <YAxis 
                             yAxisId="right"
@@ -257,16 +365,30 @@ export default function HistoricalDataModal({
                             tickLine={false}
                             tick={{ fontSize: 12, fill: '#34D399' }}
                             tickFormatter={(value) => `₹${formatNumber(value)}`}
+                            domain={priceDomain}
                           />
                           <Tooltip content={CustomTooltip} />
+                          
+                          {/* Reference Area for Zoom Selection */}
+                          {refAreaLeft && refAreaRight && (
+                            <ReferenceArea 
+                              yAxisId="left" 
+                              x1={refAreaLeft} 
+                              x2={refAreaRight} 
+                              strokeOpacity={0.3} 
+                              fillOpacity={0.3}
+                              fill="#8884d8"
+                            />
+                          )}
+                          
                           <Line 
                             yAxisId="left"
                             type="monotone" 
                             dataKey="openInterest" 
                             stroke="#60A5FA"
                             strokeWidth={2.5}
-                            dot={{ fill: '#60A5FA', strokeWidth: 0, r: 4 }}
-                            activeDot={{ r: 6, stroke: '#60A5FA', strokeWidth: 2, fill: '#1E293B' }}
+                            dot={{ fill: '#60A5FA', strokeWidth: 0, r: 3 }}
+                            activeDot={{ r: 5, stroke: '#60A5FA', strokeWidth: 2, fill: '#1E293B' }}
                           />
                           <Line 
                             yAxisId="right"
@@ -274,21 +396,58 @@ export default function HistoricalDataModal({
                             dataKey="settlePrice" 
                             stroke="#34D399"
                             strokeWidth={2.5}
-                            dot={{ fill: '#34D399', strokeWidth: 0, r: 4 }}
-                            activeDot={{ r: 6, stroke: '#34D399', strokeWidth: 2, fill: '#1E293B' }}
+                            dot={{ fill: '#34D399', strokeWidth: 0, r: 3 }}
+                            activeDot={{ r: 5, stroke: '#34D399', strokeWidth: 2, fill: '#1E293B' }}
                           />
                         </LineChart>
                       </ResponsiveContainer>
                     </div>
 
+                    {/* Brush for Timeline Navigation */}
+                    {chartData.length > 20 && (
+                      <div className="h-16 w-full bg-slate-800/10 rounded-lg p-2">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={chartData}>
+                            <XAxis 
+                              dataKey="date" 
+                              axisLine={false}
+                              tickLine={false}
+                              tick={false}
+                            />
+                            <Line 
+                              type="monotone" 
+                              dataKey="settlePrice" 
+                              stroke="#34D399"
+                              strokeWidth={1}
+                              dot={false}
+                            />
+                            <Brush 
+                              dataKey="date"
+                              height={30}
+                              stroke="#60A5FA"
+                              fill="#1E293B"
+                              onChange={(brushData) => {
+                                if (brushData && chartData[brushData.startIndex] && chartData[brushData.endIndex]) {
+                                  setDataRange({
+                                    left: chartData[brushData.startIndex].date,
+                                    right: chartData[brushData.endIndex].date
+                                  });
+                                }
+                              }}
+                            />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    )}
+
                     {/* Chart Insights */}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
-                      <div className="bg-slate-800/40 rounded-lg p-4 border border-slate-700/50">
+                      {/* <div className="bg-slate-800/40 rounded-lg p-4 border border-slate-700/50">
                         <h4 className="text-sm font-semibold text-gray-300 mb-2">Open Interest Trend</h4>
                         <div className="flex items-center gap-2">
-                          {chartData.length > 1 && (
+                          {displayData.length > 1 && (
                             <>
-                              {chartData[chartData.length - 1].openInterest > chartData[0].openInterest ? (
+                              {displayData[displayData.length - 1].openInterest > displayData[0].openInterest ? (
                                 <>
                                   <TrendingUp className="w-4 h-4 text-green-400" />
                                   <span className="text-green-400 text-sm font-medium">Increasing</span>
@@ -307,9 +466,9 @@ export default function HistoricalDataModal({
                       <div className="bg-slate-800/40 rounded-lg p-4 border border-slate-700/50">
                         <h4 className="text-sm font-semibold text-gray-300 mb-2">Price Trend</h4>
                         <div className="flex items-center gap-2">
-                          {chartData.length > 1 && (
+                          {displayData.length > 1 && (
                             <>
-                              {chartData[chartData.length - 1].settlePrice > chartData[0].settlePrice ? (
+                              {displayData[displayData.length - 1].settlePrice > displayData[0].settlePrice ? (
                                 <>
                                   <TrendingUp className="w-4 h-4 text-green-400" />
                                   <span className="text-green-400 text-sm font-medium">Increasing</span>
@@ -323,12 +482,12 @@ export default function HistoricalDataModal({
                             </>
                           )}
                         </div>
-                      </div>
+                      </div> */}
 
                       <div className="bg-slate-800/40 rounded-lg p-4 border border-slate-700/50">
                         <h4 className="text-sm font-semibold text-gray-300 mb-2">Data Points</h4>
                         <div className="flex items-center gap-2">
-                          <span className="text-nse-accent text-xl font-bold">{chartData.length}</span>
+                          <span className="text-nse-accent text-xl font-bold">{displayData.length}</span>
                           <span className="text-gray-400 text-sm">records</span>
                         </div>
                       </div>
@@ -338,12 +497,12 @@ export default function HistoricalDataModal({
 
                 {/* Summary Stats - Only show in table view */}
                 {activeView === 'table' && (
-                  <div className="mt-6 grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="mt-6 grid grid-cols-2 md:grid-cols-5 gap-4">
                     <div className="bg-slate-800/50 rounded-lg p-4">
                       <p className="text-sm text-gray-400 mb-1">Total Records</p>
                       <p className="text-xl font-bold text-gray-100">{data.length}</p>
                     </div>
-                    <div className="bg-slate-800/50 rounded-lg p-4">
+                    {/* <div className="bg-slate-800/50 rounded-lg p-4">
                       <p className="text-sm text-gray-400 mb-1">Avg OI</p>
                       <p className="text-xl font-bold text-gray-100">
                         {formatNumber(data.reduce((sum, d) => sum + d.FH_OPEN_INT, 0) / data.length)}
@@ -351,7 +510,7 @@ export default function HistoricalDataModal({
                     </div>
                     <div className="bg-slate-800/50 rounded-lg p-4">
                       <p className="text-sm text-gray-400 mb-1">Total OI Change</p>
-                      <p className={`text-xl font-bold ${getOIChangeColor(data.reduce((sum, d) => sum + d.FH_CHANGE_IN_OI, 0))}`}>
+                      <p className={`text-xl font-bold ${getChangeColor(data.reduce((sum, d) => sum + d.FH_CHANGE_IN_OI, 0))}`}>
                         {formatNumber(data.reduce((sum, d) => sum + d.FH_CHANGE_IN_OI, 0))}
                       </p>
                     </div>
@@ -361,6 +520,12 @@ export default function HistoricalDataModal({
                         ₹{formatNumber(data.reduce((sum, d) => sum + d.FH_SETTLE_PRICE, 0) / data.length)}
                       </p>
                     </div>
+                    <div className="bg-slate-800/50 rounded-lg p-4">
+                      <p className="text-sm text-gray-400 mb-1">Avg Price Change</p>
+                      <p className={`text-xl font-bold ${getChangeColor(dataWithPriceChange.reduce((sum, d) => sum + d.priceChange, 0))}`}>
+                        ₹{formatNumber(Math.abs(dataWithPriceChange.reduce((sum, d) => sum + d.priceChange, 0) / dataWithPriceChange.length))}
+                      </p>
+                    </div> */}
                   </div>
                 )}
               </>

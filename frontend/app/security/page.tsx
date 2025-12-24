@@ -120,7 +120,9 @@ function SecurityPageContent() {
         FH_UNDERLYING_VALUE: futuresAnalysis.underlyingValue,
         FH_OPEN_INT: futuresAnalysis.openInterest,
         FH_CHANGE_IN_OI: futuresAnalysis.changeinOpenInterest,
-        FH_SETTLE_PRICE: futuresAnalysis.lastPrice
+        FH_SETTLE_PRICE: futuresAnalysis.lastPrice,
+        FH_PREV_CLS: futuresAnalysis.prevClose,
+        FH_CLOSING_PRICE: futuresAnalysis.lastPrice
       };
     }
 
@@ -142,7 +144,9 @@ function SecurityPageContent() {
           FH_UNDERLYING_VALUE: analysisData.data.underlying_value,
           FH_OPEN_INT: relevantOption.openInterest || 0,
           FH_CHANGE_IN_OI: relevantOption.changeinOpenInterest || 0,
-          FH_SETTLE_PRICE: relevantOption.lastPrice || 0
+          FH_SETTLE_PRICE: relevantOption.lastPrice || 0,
+          FH_PREV_CLS: relevantOption.prevClose || 0,
+          FH_CLOSING_PRICE: relevantOption.lastPrice || 0
         };
       }
     }
@@ -258,7 +262,7 @@ function SecurityPageContent() {
       
       if (response.success && response.data && response.data.data.length > 0) {
         const data = response.data.data[0];
-        const { pchange, pchangeinOpenInterest, underlyingValue, lastPrice, openInterest, changeinOpenInterest } = data;
+        const { pchange, pchangeinOpenInterest, underlyingValue, lastPrice, openInterest, changeinOpenInterest, prevClose } = data;
         
         let action = '';
         let color = '';
@@ -287,7 +291,8 @@ function SecurityPageContent() {
           timestamp: response.data.timestamp,
           lastPrice,
           openInterest,
-          changeinOpenInterest
+          changeinOpenInterest,
+          prevClose
         });
       } else {
         console.error('No futures data available or API error:', response.error);
@@ -298,7 +303,8 @@ function SecurityPageContent() {
           timestamp: '',
           lastPrice: 0,
           openInterest: 0,
-          changeinOpenInterest: 0
+          changeinOpenInterest: 0,
+          prevClose: 0
         });
       }
     } catch (error) {
@@ -310,7 +316,8 @@ function SecurityPageContent() {
         timestamp: '',
         lastPrice: 0,
         openInterest: 0,
-        changeinOpenInterest: 0
+        changeinOpenInterest: 0,
+        prevClose: 0
       });
     } finally {
       setFuturesLoading(false);
