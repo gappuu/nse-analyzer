@@ -30,8 +30,8 @@ struct BhavCopyData {
 
 #[derive(Debug, Clone, Deserialize)]
 struct BhavCopySummary {
-    #[serde(rename = "AsOn")]
-    as_on: String,
+    // #[serde(rename = "AsOn")]
+    // as_on: String,
     #[serde(rename = "Count")]
     count: i32,
     // #[serde(rename = "Status")]
@@ -116,20 +116,20 @@ impl MCXClient {
     }
 
     /// Parse epoch timestamp from MCX format to NaiveDate
-    fn parse_epoch_to_date(epoch_str: &str) -> Option<NaiveDate> {
-        // Extract epoch from format "/Date(1766128567354)/"
-        if let Some(start) = epoch_str.find('(') {
-            if let Some(end) = epoch_str.find(')') {
-                if let Ok(epoch_ms) = epoch_str[start + 1..end].parse::<i64>() {
-                    let epoch_secs = epoch_ms / 1000;
-                    if let Some(datetime) = chrono::DateTime::from_timestamp(epoch_secs, 0) {
-                        return Some(datetime.date_naive());
-                    }
-                }
-            }
-        }
-        None
-    }
+    // fn parse_epoch_to_date(epoch_str: &str) -> Option<NaiveDate> {
+    //     // Extract epoch from format "/Date(1766128567354)/"
+    //     if let Some(start) = epoch_str.find('(') {
+    //         if let Some(end) = epoch_str.find(')') {
+    //             if let Ok(epoch_ms) = epoch_str[start + 1..end].parse::<i64>() {
+    //                 let epoch_secs = epoch_ms / 1000;
+    //                 if let Some(datetime) = chrono::DateTime::from_timestamp(epoch_secs, 0) {
+    //                     return Some(datetime.date_naive());
+    //                 }
+    //             }
+    //         }
+    //     }
+    //     None
+    // }
 
     /// Get previous weekday from given date
     fn get_previous_weekday(date: NaiveDate) -> NaiveDate {
@@ -147,7 +147,7 @@ impl MCXClient {
         let max_attempts = 5; // Don't go back more than 5 days
         
         for attempt in 0..max_attempts {
-            // println!("🔍 Trying to fetch MCX data for date: {}", data_date);
+            println!("🔍 Attempt {}/{}: Trying to fetch MCX data for date: {}", attempt + 1, max_attempts, data_date);
             
             let payload = BhavCopyPayload {
                 date: data_date.clone(),
@@ -191,44 +191,54 @@ impl MCXClient {
             match result {
                 Ok(response) => {
                     if response.d.summary.count > 0 {
-                        // println!("✅ Found {} OPTFUT entries for date {}", response.d.summary.count, data_date);
+                        println!("✅ Found {} OPTFUT entries for date {}", response.d.summary.count, data_date);
                         return Ok(response);
                     } else {
-                        println!("⚠️  No data found for date {} (count: 0), trying previous date...", data_date);
+                        println!("⚠️  No data found for date {} (count: 0)", data_date);
                         
-                        // Use AsOn date if available, otherwise calculate previous weekday
-                        if let Some(as_on_date) = Self::parse_epoch_to_date(&response.d.summary.as_on) {
-                            let prev_date = Self::get_previous_weekday(as_on_date);
-                            data_date = prev_date.format("%Y%m%d").to_string();
-                        } else {
-                            // Fallback to manual calculation
-                            if let Ok(current_date) = NaiveDate::parse_from_str(&data_date, "%Y%m%d") {
-                                let prev_date = Self::get_previous_weekday(current_date);
-                                data_date = prev_date.format("%Y%m%d").to_string();
-                            } else {
-                                return Err(anyhow!("Failed to parse date format: {}", data_date));
-                            }
+                        if attempt == max_attempts - 1 {
+                            return Err(anyhow!("No data found after {} attempts", max_attempts));
                         }
+                        
+                        // ALWAYS go to previous weekday from CURRENT data_date
+                        // Don't use AsOn - it can cause infinite loops
+                        let current_date = NaiveDate::parse_from_str(&data_date, "%Y%m%d")
+                            .map_err(|_| anyhow!("Failed to parse date format: {}", data_date))?;
+                        
+                        let prev_date = Self::get_previous_weekday(current_date);
+                        
+                        println!("📅 Moving from {} to previous weekday {}", 
+                                current_date.format("%Y-%m-%d"), 
+                                prev_date.format("%Y-%m-%d"));
+                        
+                        data_date = prev_date.format("%Y%m%d").to_string();
+                        println!("🔄 Next attempt will use date: {}", data_date);
                     }
                 }
                 Err(e) => {
                     println!("❌ Failed to fetch data for date {}: {}", data_date, e);
+                    
                     if attempt == max_attempts - 1 {
-                        return Err(anyhow!("Failed to fetch MCX data after {} attempts", max_attempts));
+                        return Err(anyhow!("Failed to fetch MCX data after {} attempts. Last error: {}", max_attempts, e));
                     }
                     
                     // Try previous weekday
-                    if let Ok(current_date) = NaiveDate::parse_from_str(&data_date, "%Y%m%d") {
-                        let prev_date = Self::get_previous_weekday(current_date);
-                        data_date = prev_date.format("%Y%m%d").to_string();
-                    } else {
-                        return Err(anyhow!("Failed to parse date format: {}", data_date));
-                    }
+                    let current_date = NaiveDate::parse_from_str(&data_date, "%Y%m%d")
+                        .map_err(|_| anyhow!("Failed to parse date format: {}", data_date))?;
+                    
+                    let prev_date = Self::get_previous_weekday(current_date);
+                    
+                    println!("📅 After error, moving from {} to previous weekday {}", 
+                            current_date.format("%Y-%m-%d"), 
+                            prev_date.format("%Y-%m-%d"));
+                    
+                    data_date = prev_date.format("%Y%m%d").to_string();
+                    println!("🔄 Next attempt will use date: {}", data_date);
                 }
             }
         }
         
-        Err(anyhow!("Exhausted all attempts to fetch MCX data"))
+        Err(anyhow!("Exhausted all {} attempts to fetch MCX data", max_attempts))
     }
 
     /// Fetch unique symbol-expiry combinations from bhav copy
