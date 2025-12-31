@@ -13,7 +13,8 @@ import {
   Clock,
   Database,
   TrendingUp,
-  Coins
+  Coins,
+  Trash2
 } from 'lucide-react';
 import { apiClient, handleApiError } from '@/app/lib/api_nse';
 import { mcxApiClient, handleMcxApiError, getMcxCommodityIcon, getMcxCommodityLetters } from '@/app/lib/api_mcx';
@@ -47,6 +48,7 @@ export default function HomePage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedLetter, setSelectedLetter] = useState<string | null>(null);
   const [mcxSelectedLetter, setMcxSelectedLetter] = useState<string | null>(null);
+  const [isClearing, setIsClearing] = useState(false);
 
   // Theme switching effect
   useEffect(() => {
@@ -155,6 +157,28 @@ export default function HomePage() {
 
   const handleMcxFetchLatest = () => {
     loadMcxData(true);
+  };
+
+  const handleClearAllCache = async () => {
+    if (!confirm('Are you sure you want to clear all cached data? This will remove all stored NSE and MCX data.')) {
+      return;
+    }
+
+    setIsClearing(true);
+    try {
+      await db.clearAllData();
+      
+      // Clear state
+      setSecuritiesData(null);
+      setMcxData(null);
+      
+      alert('All cached data has been cleared successfully!');
+    } catch (error) {
+      console.error('Error clearing cache:', error);
+      alert('Failed to clear cache. Please try again.');
+    } finally {
+      setIsClearing(false);
+    }
   };
 
   const filteredNseSecurities = React.useMemo(() => {
@@ -520,13 +544,33 @@ export default function HomePage() {
           </div>
 
           {/* Footer Bottom */}
-          <div className="border-t border-gray-600/30 mt-8 pt-6 text-center">
-            <p className="text-gray-400 text-sm">
-              Multi-Market Options Analyzer • NSE & MCX Data Platform
-            </p>
-            <p className="text-gray-500 text-xs mt-1">
-              Real-time analysis with intelligent caching
-            </p>
+          <div className="border-t border-gray-600/30 mt-8 pt-6">
+            <div className="text-center mb-4">
+              <p className="text-gray-400 text-sm">
+                Multi-Market Options Analyzer • NSE & MCX Data Platform
+              </p>
+              <p className="text-gray-500 text-xs mt-1">
+                Real-time analysis with intelligent caching
+              </p>
+            </div>
+            
+            {/* Clear Cache Button */}
+            <div className="flex justify-center mt-4">
+              <button
+                onClick={handleClearAllCache}
+                disabled={isClearing}
+                className="inline-flex items-center px-4 py-2 rounded-lg font-medium transition-all text-sm
+                         bg-red-600/20 text-red-400 hover:bg-red-600/30 border border-red-500/50
+                         hover:border-red-400 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isClearing ? (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <Trash2 className="w-4 h-4 mr-2" />
+                )}
+                {isClearing ? 'Clearing Cache...' : 'Clear All Cached Data'}
+              </button>
+            </div>
           </div>
         </div>
       </footer>

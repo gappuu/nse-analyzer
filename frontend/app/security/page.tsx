@@ -216,13 +216,32 @@ function SecurityPageContent() {
         // Append latest data from cache if available
         const latestDataPoint = createLatestDataPoint(instrumentType, strikePrice, optionType); 
         if (latestDataPoint) {
-          // Check if today's data already exists in historical data
-          const today = getToday();
-          const existsToday = finalDataArray.some((item: any) => 
-            item.FH_TIMESTAMP && item.FH_TIMESTAMP.startsWith(today)
-          );
+          // Normalize both dates to YYYY-MM-DD format for comparison
+          const normalizeDate = (dateStr: string): string => {
+            try {
+              // Handle various date formats
+              const date = new Date(dateStr);
+              if (isNaN(date.getTime())) return '';
+              
+              const year = date.getFullYear();
+              const month = String(date.getMonth() + 1).padStart(2, '0');
+              const day = String(date.getDate()).padStart(2, '0');
+              return `${year}-${month}-${day}`;
+            } catch {
+              return '';
+            }
+          };
           
-          if (!existsToday) {
+          const latestDate = normalizeDate(latestDataPoint.FH_TIMESTAMP);
+          
+          // Check if this date already exists in historical data
+          const existsInHistory = finalDataArray.some((item: any) => {
+            if (!item.FH_TIMESTAMP) return false;
+            const itemDate = normalizeDate(item.FH_TIMESTAMP);
+            return itemDate === latestDate;
+          });
+          
+          if (!existsInHistory && latestDate) {
             // Add latest data as the most recent entry
             finalDataArray = [latestDataPoint, ...finalDataArray];
           }

@@ -267,6 +267,21 @@ export default function McxHistoricalDataModal({
             };
           });
 
+          // Helper function to normalize dates for comparison
+          const normalizeDate = (dateStr: string): string => {
+            try {
+              const date = new Date(dateStr);
+              if (isNaN(date.getTime())) return '';
+              
+              const year = date.getFullYear();
+              const month = String(date.getMonth() + 1).padStart(2, '0');
+              const day = String(date.getDate()).padStart(2, '0');
+              return `${year}-${month}-${day}`;
+            } catch {
+              return '';
+            }
+          };
+
           // Append latest futures data if available and this is futures data
           if (dataType === 'futures' && latestFuturesData?.timestamp) {
             const latestDataPoint: HistoricalDataPoint = {
@@ -285,12 +300,16 @@ export default function McxHistoricalDataModal({
               value: 0 // Not available in latest data
             };
             
-            // Check if this date is not already in the historical data
-            const existingDate = processedData.find(item => 
-              item.DateDisplay === latestDataPoint.DateDisplay
-            );
+            const latestDate = normalizeDate(latestDataPoint.timestamp);
             
-            if (!existingDate) {
+            // Check if this date already exists in historical data
+            const existsInHistory = processedData.some(item => {
+              if (!item.timestamp && !item.DateDisplay) return false;
+              const itemDate = normalizeDate(item.timestamp || item.DateDisplay);
+              return itemDate === latestDate;
+            });
+            
+            if (!existsInHistory && latestDate) {
               processedData.unshift(latestDataPoint); // Add to beginning (most recent)
             }
           }
@@ -313,12 +332,16 @@ export default function McxHistoricalDataModal({
               value: 0 // Not available in latest data
             };
             
-            // Check if this date is not already in the historical data
-            const existingDate = processedData.find(item => 
-              item.DateDisplay === latestDataPoint.DateDisplay
-            );
+            const latestDate = normalizeDate(latestDataPoint.timestamp);
             
-            if (!existingDate) {
+            // Check if this date already exists in historical data
+            const existsInHistory = processedData.some(item => {
+              if (!item.timestamp && !item.DateDisplay) return false;
+              const itemDate = normalizeDate(item.timestamp || item.DateDisplay);
+              return itemDate === latestDate;
+            });
+            
+            if (!existsInHistory && latestDate) {
               processedData.unshift(latestDataPoint); // Add to beginning (most recent)
             }
           }
