@@ -461,6 +461,11 @@ export default function HomePage() {
                       <span className="text-gray-400">Updated {securitiesData.age}</span>
                     </div>
                   </div>
+                  <div className="text-xs text-gray-500 flex items-center gap-2">
+                    <span className="font-mono bg-slate-800 px-2 py-1 rounded">
+                      API Port: {process.env.NEXT_PUBLIC_NSE_API_PORT }
+                    </span>
+                  </div>
                   <button
                     onClick={handleNseFetchLatest}
                     disabled={nseFetching}
@@ -478,6 +483,11 @@ export default function HomePage() {
                 <div className="text-center py-4">
                   <AlertCircle className="w-8 h-8 text-gray-500 mx-auto mb-2" />
                   <p className="text-gray-500 text-sm">No NSE data loaded</p>
+                  <div className="text-xs text-gray-500 mt-2 flex items-center justify-center gap-2">
+                    <span className="font-mono bg-slate-800 px-2 py-1 rounded">
+                      API Port: {process.env.NEXT_PUBLIC_NSE_API_PORT}
+                    </span>
+                  </div>
                   <button
                     onClick={handleNseFetchLatest}
                     disabled={nseFetching}
@@ -514,6 +524,11 @@ export default function HomePage() {
                       <span className="text-gray-400">Updated {mcxData.age}</span>
                     </div>
                   </div>
+                  <div className="text-xs text-gray-500 flex items-center gap-2">
+                    <span className="font-mono bg-slate-800 px-2 py-1 rounded">
+                      API Port: {process.env.NEXT_PUBLIC_MCX_API_PORT}
+                    </span>
+                  </div>
                   <button
                     onClick={handleMcxFetchLatest}
                     disabled={mcxFetching}
@@ -531,6 +546,11 @@ export default function HomePage() {
                 <div className="text-center py-4">
                   <AlertCircle className="w-8 h-8 text-gray-500 mx-auto mb-2" />
                   <p className="text-gray-500 text-sm">No MCX data loaded</p>
+                  <div className="text-xs text-gray-500 mt-2 flex items-center justify-center gap-2">
+                    <span className="font-mono bg-slate-800 px-2 py-1 rounded">
+                      API Port: {process.env.NEXT_PUBLIC_MCX_API_PORT}
+                    </span>
+                  </div>
                   <button
                     onClick={handleMcxFetchLatest}
                     disabled={mcxFetching}
