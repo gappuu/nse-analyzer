@@ -21,6 +21,8 @@ import { mcxApiClient, handleMcxApiError, getMcxCommodityIcon, getMcxCommodityLe
 import { db } from '@/app/lib/db';
 import { SecurityInfo, SecurityListResponse, DataWithAge } from '@/app/types/api_nse_type';
 import { McxDataWithAge, McxTickersResponse, McxFutureSymbolsResponse } from '@/app/types/api_mcx_type';
+import { getBackendConfigs } from '@/app/lib/platform';
+import { getDb } from '@/app/lib/db_factory';
 
 type TabType = 'nse' | 'mcx';
 
@@ -49,6 +51,16 @@ export default function HomePage() {
   const [selectedLetter, setSelectedLetter] = useState<string | null>(null);
   const [mcxSelectedLetter, setMcxSelectedLetter] = useState<string | null>(null);
   const [isClearing, setIsClearing] = useState(false);
+
+  const [backendConfigs, setBackendConfigs] = useState<Array<{exchange: string, port: string}>>([]);
+  // Add useEffect to load backend configs
+  useEffect(() => {
+    async function loadBackendConfigs() {
+      const configs = await getBackendConfigs();
+      setBackendConfigs(configs);
+    }
+    loadBackendConfigs();
+  }, []);
 
   // Theme switching effect
   useEffect(() => {
@@ -160,26 +172,27 @@ export default function HomePage() {
   };
 
   const handleClearAllCache = async () => {
-    if (!confirm('Are you sure you want to clear all cached data? This will remove all stored NSE and MCX data.')) {
-      return;
-    }
+  if (!confirm('Are you sure you want to clear all cached data? This will remove all stored NSE and MCX data.')) {
+    return;
+  }
 
-    setIsClearing(true);
-    try {
-      await db.clearAllData();
-      
-      // Clear state
-      setSecuritiesData(null);
-      setMcxData(null);
-      
-      alert('All cached data has been cleared successfully!');
-    } catch (error) {
-      console.error('Error clearing cache:', error);
-      alert('Failed to clear cache. Please try again.');
-    } finally {
-      setIsClearing(false);
-    }
-  };
+  setIsClearing(true);
+  try {
+    const { db } = await getDb();
+    await db.clearAllData();
+    
+    // Clear state
+    setSecuritiesData(null);
+    setMcxData(null);
+    
+    alert('All cached data has been cleared successfully!');
+  } catch (error) {
+    console.error('Error clearing cache:', error);
+    alert('Failed to clear cache. Please try again.');
+  } finally {
+    setIsClearing(false);
+  }
+};
 
   const filteredNseSecurities = React.useMemo(() => {
     if (!securitiesData) return null;
@@ -463,7 +476,7 @@ export default function HomePage() {
                   </div>
                   <div className="text-xs text-gray-500 flex items-center gap-2">
                     <span className="font-mono bg-slate-800 px-2 py-1 rounded">
-                      API Port: {process.env.NEXT_PUBLIC_NSE_API_PORT }
+                      API Port: {backendConfigs.find(c => c.exchange === 'nse')?.port || process.env.NEXT_PUBLIC_NSE_API_PORT || '3001'}
                     </span>
                   </div>
                   <button
@@ -485,7 +498,7 @@ export default function HomePage() {
                   <p className="text-gray-500 text-sm">No NSE data loaded</p>
                   <div className="text-xs text-gray-500 mt-2 flex items-center justify-center gap-2">
                     <span className="font-mono bg-slate-800 px-2 py-1 rounded">
-                      API Port: {process.env.NEXT_PUBLIC_NSE_API_PORT}
+                      API Port: {backendConfigs.find(c => c.exchange === 'nse')?.port || process.env.NEXT_PUBLIC_NSE_API_PORT || '3001'}
                     </span>
                   </div>
                   <button
@@ -526,7 +539,8 @@ export default function HomePage() {
                   </div>
                   <div className="text-xs text-gray-500 flex items-center gap-2">
                     <span className="font-mono bg-slate-800 px-2 py-1 rounded">
-                      API Port: {process.env.NEXT_PUBLIC_MCX_API_PORT}
+                    API Port: {backendConfigs.find(c => c.exchange === 'mcx')?.port || process.env.NEXT_PUBLIC_MCX_API_PORT || '3002'}
+
                     </span>
                   </div>
                   <button
@@ -548,7 +562,8 @@ export default function HomePage() {
                   <p className="text-gray-500 text-sm">No MCX data loaded</p>
                   <div className="text-xs text-gray-500 mt-2 flex items-center justify-center gap-2">
                     <span className="font-mono bg-slate-800 px-2 py-1 rounded">
-                      API Port: {process.env.NEXT_PUBLIC_MCX_API_PORT}
+                        API Port: {backendConfigs.find(c => c.exchange === 'mcx')?.port || process.env.NEXT_PUBLIC_MCX_API_PORT || '3002'}
+
                     </span>
                   </div>
                   <button

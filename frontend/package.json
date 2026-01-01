@@ -10,6 +10,8 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@tauri-apps/api": "^2.9.1",
+    "@tauri-apps/plugin-store": "^2.4.1",
     "axios": "^1.13.2",
     "lucide-react": "^0.560.0",
     "next": "^16.0.10",

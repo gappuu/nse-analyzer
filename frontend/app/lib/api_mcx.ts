@@ -1,5 +1,6 @@
 import axios from 'axios';
-import { db, DB_KEYS } from '@/app/lib/db';
+import { getDb } from '@/app/lib/db_factory';
+import { getApiBaseUrl } from '@/app/lib/platform';
 import {
   McxApiResponse,
   McxTickersResponse,
@@ -10,24 +11,32 @@ import {
   McxBatchAnalysisResponse,
   McxHistoricalDataResponse,
   McxHistoricalDataParams,
-  // McxDataWithAge
 } from '@/app/types/api_mcx_type';
 
-// For static export, we need to use the full API URL
-const API_MCX_BASE_URL = process.env.NODE_ENV === 'development' 
-  ? 'http://localhost:3002'
-  : process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3002';
+// Dynamic API base URL
+let apiBaseUrl: string | null = null;
 
-const api = axios.create({
-  baseURL: API_MCX_BASE_URL,
-  timeout: 120000,
-});
+async function getBaseUrl(): Promise<string> {
+  if (!apiBaseUrl) {
+    apiBaseUrl = await getApiBaseUrl('mcx');
+  }
+  return apiBaseUrl;
+}
+
+const createApiInstance = async () => {
+  const baseURL = await getBaseUrl();
+  return axios.create({
+    baseURL,
+    timeout: 120000,
+  });
+};
 
 // Enhanced MCX API client with database integration
 export const mcxApiClient = {
   // Check MCX API Health
   async checkHealth(): Promise<McxApiResponse<any>> {
     try {
+      const api = await createApiInstance();
       const response = await api.get('/mcx_health');
       return response.data;
     } catch (error) {
@@ -39,6 +48,8 @@ export const mcxApiClient = {
   // MCX Tickers List
   async getTickers(forceRefresh = false): Promise<McxApiResponse<McxTickersResponse>> {
     try {
+      const { db, DB_KEYS } = await getDb();
+      
       if (!forceRefresh) {
         const cachedData = await db.getData<McxTickersResponse>(DB_KEYS.MCX_TICKERS);
         if (cachedData) {
@@ -52,6 +63,7 @@ export const mcxApiClient = {
         }
       }
 
+      const api = await createApiInstance();
       const response = await api.get('/api/mcx/tickers');
       const apiResponse: McxApiResponse<McxTickersResponse> = response.data;
 
@@ -69,6 +81,8 @@ export const mcxApiClient = {
   // MCX Future Symbols
   async getFutureSymbols(forceRefresh = false): Promise<McxApiResponse<McxFutureSymbolsResponse>> {
     try {
+      const { db, DB_KEYS } = await getDb();
+      
       if (!forceRefresh) {
         const cachedData = await db.getData<McxFutureSymbolsResponse>(DB_KEYS.MCX_FUTURE_SYMBOLS);
         if (cachedData) {
@@ -82,6 +96,7 @@ export const mcxApiClient = {
         }
       }
 
+      const api = await createApiInstance();
       const response = await api.get('/api/mcx/future-symbols');
       const apiResponse: McxApiResponse<McxFutureSymbolsResponse> = response.data;
 
@@ -103,6 +118,7 @@ export const mcxApiClient = {
     forceRefresh = false
   ): Promise<McxApiResponse<McxOptionChainResponse>> {
     try {
+      const { db, DB_KEYS } = await getDb();
       const key = DB_KEYS.MCX_OPTION_CHAIN(commodity, expiry);
       
       if (!forceRefresh) {
@@ -118,6 +134,7 @@ export const mcxApiClient = {
         }
       }
 
+      const api = await createApiInstance();
       const response = await api.get(
         `/api/mcx/option-chain?commodity=${encodeURIComponent(commodity)}&expiry=${encodeURIComponent(expiry)}`
       );
@@ -141,6 +158,7 @@ export const mcxApiClient = {
     forceRefresh = false
   ): Promise<McxApiResponse<McxFutureQuoteResponse>> {
     try {
+      const { db, DB_KEYS } = await getDb();
       const key = DB_KEYS.MCX_FUTURE_QUOTE(commodity, expiry);
       
       if (!forceRefresh) {
@@ -156,6 +174,7 @@ export const mcxApiClient = {
         }
       }
 
+      const api = await createApiInstance();
       const response = await api.get(
         `/api/mcx/future-quote?commodity=${encodeURIComponent(commodity)}&expiry=${encodeURIComponent(expiry)}`
       );
@@ -181,6 +200,7 @@ export const mcxApiClient = {
     forceRefresh = false
   ): Promise<McxApiResponse<McxOptionQuoteResponse>> {
     try {
+      const { db, DB_KEYS } = await getDb();
       const key = DB_KEYS.MCX_OPTION_QUOTE(commodity, expiry, optionType, strikePrice);
       
       if (!forceRefresh) {
@@ -203,6 +223,7 @@ export const mcxApiClient = {
         strike_price: strikePrice
       });
 
+      const api = await createApiInstance();
       const response = await api.get(`/api/mcx/option-quote?${queryParams.toString()}`);
       const apiResponse: McxApiResponse<McxOptionQuoteResponse> = response.data;
 
@@ -220,6 +241,8 @@ export const mcxApiClient = {
   // MCX Batch Analysis
   async getBatchAnalysis(forceRefresh = false): Promise<McxApiResponse<McxBatchAnalysisResponse>> {
     try {
+      const { db, DB_KEYS } = await getDb();
+      
       if (!forceRefresh) {
         const cachedData = await db.getData<McxBatchAnalysisResponse>(DB_KEYS.MCX_BATCH_ANALYSIS);
         if (cachedData) {
@@ -233,6 +256,7 @@ export const mcxApiClient = {
         }
       }
 
+      const api = await createApiInstance();
       const response = await api.post('/api/mcx/batch-analysis');
       const apiResponse: McxApiResponse<McxBatchAnalysisResponse> = response.data;
 
@@ -250,6 +274,8 @@ export const mcxApiClient = {
   // MCX Historical Data - Updated with new required parameters
   async getHistoricalData(params: McxHistoricalDataParams): Promise<McxApiResponse<McxHistoricalDataResponse>> {
     try {
+      const { db, DB_KEYS } = await getDb();
+      
       // Create cache key that includes all parameters
       const keyParams = [
         params.symbol,
@@ -290,6 +316,7 @@ export const mcxApiClient = {
         queryParams.set('strike', params.strike_price);
       }
 
+      const api = await createApiInstance();
       const response = await api.get(`/api/mcx/historic-data?${queryParams.toString()}`);
       const apiResponse: McxApiResponse<McxHistoricalDataResponse> = response.data;
 
@@ -334,30 +361,37 @@ export const mcxApiClient = {
 
   // Check if data exists in cache
   async hasTickers(): Promise<boolean> {
+    const { db, DB_KEYS } = await getDb();
     return await db.hasData(DB_KEYS.MCX_TICKERS);
   },
 
   async hasFutureSymbols(): Promise<boolean> {
+    const { db, DB_KEYS } = await getDb();
     return await db.hasData(DB_KEYS.MCX_FUTURE_SYMBOLS);
   },
 
   async hasOptionChain(commodity: string, expiry: string): Promise<boolean> {
+    const { db, DB_KEYS } = await getDb();
     return await db.hasData(DB_KEYS.MCX_OPTION_CHAIN(commodity, expiry));
   },
 
   async hasFutureQuote(commodity: string, expiry: string): Promise<boolean> {
+    const { db, DB_KEYS } = await getDb();
     return await db.hasData(DB_KEYS.MCX_FUTURE_QUOTE(commodity, expiry));
   },
 
   async hasOptionQuote(commodity: string, expiry: string, optionType: string, strikePrice: string): Promise<boolean> {
+    const { db, DB_KEYS } = await getDb();
     return await db.hasData(DB_KEYS.MCX_OPTION_QUOTE(commodity, expiry, optionType, strikePrice));
   },
 
   async hasBatchAnalysis(): Promise<boolean> {
+    const { db, DB_KEYS } = await getDb();
     return await db.hasData(DB_KEYS.MCX_BATCH_ANALYSIS);
   },
 
   async hasHistoricalData(params: McxHistoricalDataParams): Promise<boolean> {
+    const { db, DB_KEYS } = await getDb();
     const keyParams = [
       params.symbol,
       params.expiry,

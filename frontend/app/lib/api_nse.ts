@@ -7,23 +7,34 @@ import {
   BatchAnalysisResponse,
   FuturesDataResponse,
 } from '@/app/types/api_nse_type';
-import { db, DB_KEYS } from '@/app/lib/db';
+import { getDb } from '@/app/lib/db_factory';
+import { getApiBaseUrl } from '@/app/lib/platform';
 
-// For static export, we need to use the full API URL
-const API_NSE_BASE_URL = process.env.NODE_ENV === 'development' 
-  ? 'http://localhost:3001'
-  : process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+// Dynamic API base URL
+let apiBaseUrl: string | null = null;
 
-const api = axios.create({
-  baseURL: API_NSE_BASE_URL,
-  timeout: 120000,
-});
+async function getBaseUrl(): Promise<string> {
+  if (!apiBaseUrl) {
+    apiBaseUrl = await getApiBaseUrl('nse');
+  }
+  return apiBaseUrl;
+}
+
+const createApiInstance = async () => {
+  const baseURL = await getBaseUrl();
+  return axios.create({
+    baseURL,
+    timeout: 120000,
+  });
+};
 
 // Enhanced API client with database integration
 export const apiClient = {
   // Securities List
   async getSecurities(forceRefresh = false): Promise<ApiResponse<SecurityListResponse>> {
     try {
+      const { db, DB_KEYS } = await getDb();
+      
       if (!forceRefresh) {
         const cachedData = await db.getData<SecurityListResponse>(DB_KEYS.SECURITIES_LIST);
         if (cachedData) {
@@ -37,6 +48,7 @@ export const apiClient = {
         }
       }
 
+      const api = await createApiInstance();
       const response = await api.get('/api/nse/securities');
       const apiResponse: ApiResponse<SecurityListResponse> = response.data;
 
@@ -54,6 +66,7 @@ export const apiClient = {
   // Contract Info
   async getContractInfo(symbol: string, forceRefresh = false): Promise<ApiResponse<ContractInfoResponse>> {
     try {
+      const { db, DB_KEYS } = await getDb();
       const key = DB_KEYS.CONTRACT_INFO(symbol);
       
       if (!forceRefresh) {
@@ -69,6 +82,7 @@ export const apiClient = {
         }
       }
 
+      const api = await createApiInstance();
       const response = await api.get(`/api/nse/contract-info?symbol=${encodeURIComponent(symbol)}`);
       const apiResponse: ApiResponse<ContractInfoResponse> = response.data;
 
@@ -90,6 +104,7 @@ export const apiClient = {
     forceRefresh = false
   ): Promise<ApiResponse<SingleAnalysisResponse>> {
     try {
+      const { db, DB_KEYS } = await getDb();
       const key = DB_KEYS.SINGLE_ANALYSIS(symbol, expiry);
       
       if (!forceRefresh) {
@@ -105,6 +120,7 @@ export const apiClient = {
         }
       }
 
+      const api = await createApiInstance();
       const response = await api.get(
         `/api/nse/single-analysis?symbol=${encodeURIComponent(symbol)}&expiry=${encodeURIComponent(expiry)}`
       );
@@ -128,6 +144,7 @@ export const apiClient = {
     forceRefresh = false
   ): Promise<ApiResponse<FuturesDataResponse>> {
     try {
+      const { db, DB_KEYS } = await getDb();
       const key = DB_KEYS.FUTURES_DATA(symbol, expiry);
       
       if (!forceRefresh) {
@@ -143,6 +160,7 @@ export const apiClient = {
         }
       }
 
+      const api = await createApiInstance();
       const response = await api.get(
         `/api/nse/futures-data?symbol=${encodeURIComponent(symbol)}&expiry=${encodeURIComponent(expiry)}`
       );
@@ -162,6 +180,8 @@ export const apiClient = {
   // Batch Analysis
   async getBatchAnalysis(forceRefresh = false): Promise<ApiResponse<BatchAnalysisResponse>> {
     try {
+      const { db, DB_KEYS } = await getDb();
+      
       if (!forceRefresh) {
         const cachedData = await db.getData<BatchAnalysisResponse>(DB_KEYS.BATCH_ANALYSIS);
         if (cachedData) {
@@ -175,6 +195,7 @@ export const apiClient = {
         }
       }
 
+      const api = await createApiInstance();
       const response = await api.post('/api/nse/batch-analysis');
       const apiResponse: ApiResponse<BatchAnalysisResponse> = response.data;
 
@@ -213,6 +234,7 @@ export const apiClient = {
       if (params.strike_price) queryParams.append('strike_price', params.strike_price);
       if (params.option_type) queryParams.append('option_type', params.option_type);
 
+      const api = await createApiInstance();
       const response = await api.get(`/api/nse/derivatives-historical?${queryParams.toString()}`);
       return response.data;
     } catch (error) {
@@ -223,22 +245,27 @@ export const apiClient = {
 
   // Check if data exists in cache
   async hasSecurities(): Promise<boolean> {
+    const { db, DB_KEYS } = await getDb();
     return await db.hasData(DB_KEYS.SECURITIES_LIST);
   },
 
   async hasContractInfo(symbol: string): Promise<boolean> {
+    const { db, DB_KEYS } = await getDb();
     return await db.hasData(DB_KEYS.CONTRACT_INFO(symbol));
   },
 
   async hasSingleAnalysis(symbol: string, expiry: string): Promise<boolean> {
+    const { db, DB_KEYS } = await getDb();
     return await db.hasData(DB_KEYS.SINGLE_ANALYSIS(symbol, expiry));
   },
 
   async hasFuturesData(symbol: string, expiry: string): Promise<boolean> {
+    const { db, DB_KEYS } = await getDb();
     return await db.hasData(DB_KEYS.FUTURES_DATA(symbol, expiry));
   },
 
   async hasBatchAnalysis(): Promise<boolean> {
+    const { db, DB_KEYS } = await getDb();
     return await db.hasData(DB_KEYS.BATCH_ANALYSIS);
   }
 };
