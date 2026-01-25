@@ -214,9 +214,16 @@ async fn start_backends(
         .resource_dir()
         .map_err(|_| "Failed to locate resource directory")?;
 
+    // Platform-specific binary names
+    #[cfg(target_os = "windows")]
+    let binary_name = "nse-analyzer.exe";
+    
+    #[cfg(not(target_os = "windows"))]
+    let binary_name = "nse-analyzer";
+
     let backend_path = [
-        resource_dir.join("nse-analyzer"),
-        resource_dir.join("resource/nse-analyzer"),
+        resource_dir.join(binary_name),
+        resource_dir.join(format!("resource/{}", binary_name)),
     ]
     .into_iter()
     .find(|p| p.exists())

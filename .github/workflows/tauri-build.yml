@@ -1,0 +1,301 @@
+name: Build Tauri App
+
+# Performance Optimizations:
+# 1. Parallel builds: Uses all CPU cores (--jobs flag) 
+# 2. LLD linker: Faster linking on Linux (2-5x faster than default ld)
+# 3. Separate caching: Backend, Tauri, and Cargo registry cached independently  
+# 4. CARGO_INCREMENTAL=0: Faster clean builds in CI environment
+# 5. Cargo target caching: Reuses compiled dependencies across builds
+
+on:
+  workflow_dispatch:
+    inputs:
+      os:
+        description: 'Select the OS to build'
+        required: true
+        default: 'ubuntu-latest'
+        type: choice
+        options:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
+
+jobs:
+  build:
+    name: Build on ${{ github.event.inputs.os }}
+    runs-on: ${{ github.event.inputs.os }}
+
+    steps:
+      # 1️⃣ Checkout repo
+      - uses: actions/checkout@v4
+
+      # 2️⃣ Set up Node.js
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: |
+            tauri-app/package-lock.json
+            frontend/package-lock.json
+
+      # 3️⃣ Ubuntu: install system dependencies
+      - name: Install Ubuntu dependencies
+        if: github.event.inputs.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libglib2.0-dev \
+            libgtk-3-dev \
+            build-essential \
+            libsoup-3.0-dev \
+            libwebkit2gtk-4.1-dev \
+            libsecret-1-dev \
+            libfuse2 \
+            desktop-file-utils \
+            libx11-dev \
+            libxcomposite-dev \
+            libxrandr-dev \
+            libxcursor-dev \
+            libxinerama-dev \
+            libxi-dev \
+            xvfb \
+            clang \
+            lld \
+            file
+          # Setup for AppImage
+          export XDG_RUNTIME_DIR=/tmp/runtime-$USER
+          mkdir -p $XDG_RUNTIME_DIR
+          # Use faster linker (lld)
+          echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> $GITHUB_ENV
+          # AppImage requires this
+          echo "NO_STRIP=true" >> $GITHUB_ENV
+          echo "APPIMAGE_EXTRACT_AND_RUN=1" >> $GITHUB_ENV
+
+      # 4️⃣ Install Rust
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # 5️⃣ Configure build optimizations
+      - name: Configure Rust build settings
+        run: |
+          # Disable incremental compilation (better for clean CI builds)
+          echo "CARGO_INCREMENTAL=0" >> $GITHUB_ENV
+        shell: bash
+
+      # 6️⃣ Cache Cargo registry and git
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: ${{ github.event.inputs.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ github.event.inputs.os }}-cargo-registry-
+
+      # 7️⃣ Cache Backend target directory
+      - name: Cache Backend target
+        uses: actions/cache@v4
+        with:
+          path: backend/target
+          key: ${{ github.event.inputs.os }}-backend-target-${{ hashFiles('backend/Cargo.lock') }}
+          restore-keys: |
+            ${{ github.event.inputs.os }}-backend-target-
+
+      # 8️⃣ Cache Tauri target directory
+      - name: Cache Tauri target
+        uses: actions/cache@v4
+        with:
+          path: tauri-app/src-tauri/target
+          key: ${{ github.event.inputs.os }}-tauri-target-${{ hashFiles('tauri-app/src-tauri/Cargo.lock') }}
+          restore-keys: |
+            ${{ github.event.inputs.os }}-tauri-target-
+
+      # 9️⃣ Install frontend dependencies
+      - name: Install frontend deps
+        working-directory: ./frontend
+        run: npm ci
+
+      # 🔟 Build Frontend Static Files
+      - name: Build Frontend
+        working-directory: ./frontend
+        run: npm run build
+
+      # 1️⃣1️⃣ Build Backend Binary (Unix)
+      - name: Build Backend Binary (Unix)
+        if: github.event.inputs.os != 'windows-latest'
+        working-directory: ./backend
+        run: |
+          echo "🔨 Starting backend build at $(date)"
+          # Detect number of CPU cores (macOS vs Linux)
+          if [[ "$OSTYPE" == "darwin"* ]]; then
+            JOBS=$(sysctl -n hw.ncpu)
+          else
+            JOBS=$(nproc)
+          fi
+          echo "Using $JOBS parallel jobs"
+          time cargo build --release --jobs $JOBS
+          echo "✅ Backend build completed at $(date)"
+
+      - name: Build Backend Binary (Windows)
+        if: github.event.inputs.os == 'windows-latest'
+        working-directory: ./backend
+        run: |
+          Write-Host "🔨 Starting backend build at $(Get-Date)"
+          $startTime = Get-Date
+          cargo build --release --jobs $env:NUMBER_OF_PROCESSORS
+          $duration = (Get-Date) - $startTime
+          Write-Host "✅ Backend build completed in $($duration.TotalMinutes) minutes"
+        shell: pwsh
+
+      # 1️⃣2️⃣ Copy Backend Binary to Resource Folder
+      - name: Copy Backend Binary to Resource (Unix)
+        if: github.event.inputs.os != 'windows-latest'
+        run: |
+          mkdir -p tauri-app/src-tauri/resource
+          cp backend/target/release/nse-analyzer tauri-app/src-tauri/resource/
+          chmod +x tauri-app/src-tauri/resource/nse-analyzer
+          ls -la tauri-app/src-tauri/resource/
+
+      - name: Copy Backend Binary to Resource (Windows)
+        if: github.event.inputs.os == 'windows-latest'
+        run: |
+          New-Item -ItemType Directory -Force -Path tauri-app\src-tauri\resource
+          # Copy with .exe extension as Windows requires it
+          Copy-Item backend\target\release\nse-analyzer.exe tauri-app\src-tauri\resource\nse-analyzer.exe
+          # Verify files in resource directory
+          Write-Host "=== Contents of resource directory ==="
+          Get-ChildItem -Force tauri-app\src-tauri\resource\
+          Write-Host "======================================"
+        shell: pwsh
+      
+      # 1️⃣2️⃣ Copy Backend Binary to Resource Folder
+      - name: Copy Backend Binary to Resource (Unix)
+        if: github.event.inputs.os != 'windows-latest'
+        run: |
+          mkdir -p tauri-app/src-tauri/resource
+          cp backend/target/release/nse-analyzer tauri-app/src-tauri/resource/
+          chmod +x tauri-app/src-tauri/resource/nse-analyzer
+          ls -la tauri-app/src-tauri/resource/
+
+      - name: Copy Backend Binary to Resource (Windows)
+        if: github.event.inputs.os == 'windows-latest'
+        run: |
+          New-Item -ItemType Directory -Force -Path tauri-app\src-tauri\resource
+          # Copy with .exe extension as Windows requires it
+          Copy-Item backend\target\release\nse-analyzer.exe tauri-app\src-tauri\resource\nse-analyzer.exe
+          # Verify files in resource directory
+          Write-Host "=== Contents of resource directory ==="
+          Get-ChildItem -Force tauri-app\src-tauri\resource\
+          Write-Host "======================================"
+        shell: pwsh
+      
+      # 1️⃣3️⃣ Update tauri.conf.json for Windows to use .exe extension
+      - name: Update Tauri config for Windows
+        if: github.event.inputs.os == 'windows-latest'
+        working-directory: ./tauri-app/src-tauri
+        run: |
+          $config = Get-Content tauri.conf.json -Raw | ConvertFrom-Json
+          # Update resources to include .exe for Windows
+          $config.bundle.resources = @("resource/nse-analyzer.exe")
+          $config | ConvertTo-Json -Depth 10 | Set-Content tauri.conf.json
+          Write-Host "Updated tauri.conf.json resources for Windows:"
+          Write-Host $config.bundle.resources
+        shell: pwsh
+
+      # 1️⃣4️⃣ Install Tauri dependencies
+      - name: Install Tauri deps
+        working-directory: ./tauri-app
+        run: npm ci
+
+      # 1️⃣5️⃣ Verify resource before build (Windows)
+      - name: Verify resource before Tauri build (Windows)
+        if: github.event.inputs.os == 'windows-latest'
+        working-directory: ./tauri-app/src-tauri
+        run: |
+          Write-Host "=== Current directory ==="
+          Get-Location
+          Write-Host "=== Checking for resource\nse-analyzer.exe ==="
+          if (Test-Path "resource\nse-analyzer.exe") {
+            Write-Host "✓ Found: resource\nse-analyzer.exe"
+            Get-Item "resource\nse-analyzer.exe"
+          } else {
+            Write-Error "✗ NOT FOUND: resource\nse-analyzer.exe"
+            Write-Host "Directory contents:"
+            Get-ChildItem -Recurse resource\ -ErrorAction SilentlyContinue
+            exit 1
+          }
+        shell: pwsh
+
+      - name: Verify resource before Tauri build (Unix)
+        if: github.event.inputs.os != 'windows-latest'
+        working-directory: ./tauri-app/src-tauri
+        run: |
+          echo "=== Current directory ==="
+          pwd
+          echo "=== Checking for resource/nse-analyzer ==="
+          if [ -f "resource/nse-analyzer" ]; then
+            echo "✓ Found: resource/nse-analyzer"
+            ls -lh resource/nse-analyzer
+          else
+            echo "✗ NOT FOUND: resource/nse-analyzer"
+            echo "Directory contents:"
+            find resource/ -type f 2>/dev/null || echo "resource/ directory not found"
+            exit 1
+          fi
+      
+      # Optional: Disable AppImage on Linux if it continues to fail
+      - name: Configure Linux bundle targets
+        if: github.event.inputs.os == 'ubuntu-latest'
+        working-directory: ./tauri-app/src-tauri
+        run: |
+          echo "Configuring to build only deb and rpm packages (AppImage disabled due to CI issues)..."
+          node -e "
+          const fs = require('fs');
+          const config = JSON.parse(fs.readFileSync('tauri.conf.json', 'utf8'));
+          config.bundle.targets = ['deb', 'rpm'];
+          fs.writeFileSync('tauri.conf.json', JSON.stringify(config, null, 2));
+          "
+          echo "✓ Bundle targets updated to: deb, rpm"
+
+      # 1️⃣6️⃣ Build Tauri app
+      - name: Build Tauri (Unix)
+        if: github.event.inputs.os != 'windows-latest'
+        working-directory: ./tauri-app
+        run: |
+          echo "🔨 Starting Tauri build at $(date)"
+          # Detect number of CPU cores (macOS vs Linux)
+          if [[ "$OSTYPE" == "darwin"* ]]; then
+            JOBS=$(sysctl -n hw.ncpu)
+          else
+            JOBS=$(nproc)
+          fi
+          echo "Using $JOBS parallel jobs"
+          
+          # For Linux, ensure AppImage tools can execute
+          if [[ "${{ github.event.inputs.os }}" == "ubuntu-latest" ]]; then
+            export APPIMAGE_EXTRACT_AND_RUN=1
+          fi
+          
+          npm run tauri build -- -- --jobs $JOBS
+          echo "✅ Tauri build completed at $(date)"
+
+      - name: Build Tauri (Windows)
+        if: github.event.inputs.os == 'windows-latest'
+        working-directory: ./tauri-app
+        run: |
+          Write-Host "🔨 Starting Tauri build at $(Get-Date)"
+          npm run tauri build -- -- --jobs $env:NUMBER_OF_PROCESSORS
+          Write-Host "✅ Tauri build completed at $(Get-Date)"
+        shell: pwsh
+
+      # 1️⃣7️⃣ Upload artifacts
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ github.event.inputs.os }}-bundle
+          path: |
+            tauri-app/src-tauri/target/release/bundle/**/*
