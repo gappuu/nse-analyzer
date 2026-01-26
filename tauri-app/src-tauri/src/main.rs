@@ -56,6 +56,29 @@ impl BackendManager {
             
             used_ports.push(port.clone()); // Mark port as used
 
+            // Platform-specific process creation
+            #[cfg(target_os = "windows")]
+            let child = {
+                use std::os::windows::process::CommandExt;
+                const CREATE_NO_WINDOW: u32 = 0x08000000;
+                
+                Command::new(backend_path)
+                    .env("MODE", "server")
+                    .env("EXCHANGE", exchange)
+                    .env("PORT", &port)
+                    .creation_flags(CREATE_NO_WINDOW)  // Hide console window on Windows
+                    .stdout(Stdio::null())  // Discard stdout
+                    .stderr(Stdio::null())  // Discard stderr
+                    .spawn()
+                    .map_err(|e| {
+                        format!(
+                            "Failed to start {} backend on port {}: {}",
+                            exchange, port, e
+                        )
+                    })?
+            };
+
+            #[cfg(not(target_os = "windows"))]
             let child = Command::new(backend_path)
                 .env("MODE", "server")
                 .env("EXCHANGE", exchange)
