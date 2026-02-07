@@ -151,6 +151,8 @@ jobs:
     - name: Upload batch_rules.json to Vercel Blob
       if: ${{ env.ANALYSIS_SUCCESS == 'true' }}
       working-directory: backend
+      env:
+        BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
       run: |
         cat > upload-blob.mjs << 'EOF'
         import { put } from '@vercel/blob';
