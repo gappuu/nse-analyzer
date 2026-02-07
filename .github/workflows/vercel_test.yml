@@ -51,7 +51,7 @@ jobs:
       run: |
         cat > upload-test.mjs << 'EOF'
         import { put } from '@vercel/blob';
-        import { readFileSync } from 'fs';
+        import { readFileSync, appendFileSync } from 'fs';
         
         try {
           const content = readFileSync(process.env.TEST_FILE_NAME, 'utf-8');
@@ -69,9 +69,8 @@ jobs:
           console.log('Size:', blob.size, 'bytes');
           
           // Save to GitHub output
-          const fs = require('fs');
-          fs.appendFileSync(process.env.GITHUB_OUTPUT, `blob_url=${blob.url}\n`);
-          fs.appendFileSync(process.env.GITHUB_OUTPUT, `blob_pathname=${blob.pathname}\n`);
+          appendFileSync(process.env.GITHUB_OUTPUT, `blob_url=${blob.url}\n`);
+          appendFileSync(process.env.GITHUB_OUTPUT, `blob_pathname=${blob.pathname}\n`);
           
           process.exit(0);
         } catch (error) {
@@ -192,6 +191,11 @@ jobs:
           echo "Deployment: Not triggered ⚠️"
         fi
         echo ""
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-
         
+        if [ "${{ job.status }}" == "success" ]; then
+          echo "✅ ALL TESTS PASSED"
+        else
+          echo "❌ SOME TESTS FAILED"
+        fi
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
