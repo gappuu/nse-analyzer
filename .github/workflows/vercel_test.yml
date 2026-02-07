@@ -1,0 +1,197 @@
+# ============================================
+# Vercel Integration Test
+# File: .github/workflows/test-vercel-integration.yml
+# Repository: nse-analyzer
+# ============================================
+
+name: Test Vercel Integration
+
+on:
+  workflow_dispatch: # Manual trigger only for testing
+
+env:
+  TEST_FILE_NAME: "test-vercel-connection.json"
+
+jobs:
+  test-vercel-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Install dependencies
+      run: |
+        npm install -g vercel@latest
+        npm install @vercel/blob
+
+    - name: Create dummy test file
+      run: |
+        cat > ${{ env.TEST_FILE_NAME }} << 'EOF'
+        {
+          "test": true,
+          "timestamp": "${{ github.run_number }}",
+          "run_id": "${{ github.run_id }}",
+          "message": "Vercel Blob integration test",
+          "generated_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        }
+        EOF
+        
+        echo "✅ Test file created:"
+        cat ${{ env.TEST_FILE_NAME }}
+
+    - name: Test Vercel Blob Upload
+      id: blob-upload
+      run: |
+        cat > upload-test.mjs << 'EOF'
+        import { put } from '@vercel/blob';
+        import { readFileSync } from 'fs';
+        
+        try {
+          const content = readFileSync(process.env.TEST_FILE_NAME, 'utf-8');
+          
+          console.log('📤 Uploading to Vercel Blob...');
+          
+          const blob = await put(`test/${process.env.TEST_FILE_NAME}`, content, {
+            access: 'public',
+            token: process.env.BLOB_READ_WRITE_TOKEN,
+          });
+          
+          console.log('✅ Upload successful!');
+          console.log('URL:', blob.url);
+          console.log('Pathname:', blob.pathname);
+          console.log('Size:', blob.size, 'bytes');
+          
+          // Save to GitHub output
+          const fs = require('fs');
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `blob_url=${blob.url}\n`);
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `blob_pathname=${blob.pathname}\n`);
+          
+          process.exit(0);
+        } catch (error) {
+          console.error('❌ Upload failed:', error.message);
+          process.exit(1);
+        }
+        EOF
+        
+        BLOB_READ_WRITE_TOKEN="${{ secrets.BLOB_READ_WRITE_TOKEN }}" \
+        TEST_FILE_NAME="${{ env.TEST_FILE_NAME }}" \
+        node upload-test.mjs
+
+    - name: Verify Blob Upload
+      if: success()
+      run: |
+        echo "🔍 Verifying uploaded file..."
+        BLOB_URL="${{ steps.blob-upload.outputs.blob_url }}"
+        
+        if [ -z "$BLOB_URL" ]; then
+          echo "❌ No blob URL found"
+          exit 1
+        fi
+        
+        echo "📥 Fetching from: $BLOB_URL"
+        HTTP_STATUS=$(curl -s -o response.json -w "%{http_code}" "$BLOB_URL")
+        
+        if [ "$HTTP_STATUS" -eq 200 ]; then
+          echo "✅ File accessible (HTTP $HTTP_STATUS)"
+          echo "📄 Content:"
+          cat response.json | jq '.'
+        else
+          echo "❌ File not accessible (HTTP $HTTP_STATUS)"
+          exit 1
+        fi
+
+    - name: Test Vercel Deployment Hook
+      id: deploy-hook
+      if: success()
+      run: |
+        echo "🚀 Triggering Vercel deployment..."
+        
+        DEPLOY_HOOK="${{ secrets.VERCEL_DEPLOY_HOOK }}"
+        
+        if [ -z "$DEPLOY_HOOK" ]; then
+          echo "⚠️ VERCEL_DEPLOY_HOOK not configured"
+          echo "deployment_triggered=false" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+        
+        RESPONSE=$(curl -s -X POST "$DEPLOY_HOOK" -w "\n%{http_code}")
+        HTTP_STATUS=$(echo "$RESPONSE" | tail -1)
+        RESPONSE_BODY=$(echo "$RESPONSE" | head -1)
+        
+        if [ "$HTTP_STATUS" -eq 200 ] || [ "$HTTP_STATUS" -eq 201 ]; then
+          echo "✅ Deployment triggered successfully (HTTP $HTTP_STATUS)"
+          echo "Response: $RESPONSE_BODY"
+          echo "deployment_triggered=true" >> $GITHUB_OUTPUT
+        else
+          echo "❌ Deployment trigger failed (HTTP $HTTP_STATUS)"
+          echo "Response: $RESPONSE_BODY"
+          echo "deployment_triggered=false" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+
+    - name: Cleanup Test File from Blob
+      if: always()
+      continue-on-error: true
+      run: |
+        cat > cleanup-test.mjs << 'EOF'
+        import { del } from '@vercel/blob';
+        
+        try {
+          const pathname = process.env.BLOB_PATHNAME;
+          
+          if (!pathname) {
+            console.log('⚠️ No pathname to cleanup');
+            process.exit(0);
+          }
+          
+          console.log('🧹 Cleaning up test file:', pathname);
+          
+          await del(pathname, {
+            token: process.env.BLOB_READ_WRITE_TOKEN,
+          });
+          
+          console.log('✅ Cleanup successful');
+        } catch (error) {
+          console.log('⚠️ Cleanup failed (non-critical):', error.message);
+        }
+        EOF
+        
+        BLOB_READ_WRITE_TOKEN="${{ secrets.BLOB_READ_WRITE_TOKEN }}" \
+        BLOB_PATHNAME="${{ steps.blob-upload.outputs.blob_pathname }}" \
+        node cleanup-test.mjs || true
+
+    - name: Generate Test Report
+      if: always()
+      run: |
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "📋 VERCEL INTEGRATION TEST REPORT"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        echo "Run ID: ${{ github.run_number }}"
+        echo "Timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        echo ""
+        echo "Test Results:"
+        echo "  ✓ Blob Upload: ${{ steps.blob-upload.outcome }}"
+        echo "  ✓ Deployment Hook: ${{ steps.deploy-hook.outcome }}"
+        echo ""
+        
+        if [ "${{ steps.blob-upload.outputs.blob_url }}" != "" ]; then
+          echo "Blob URL: ${{ steps.blob-upload.outputs.blob_url }}"
+        fi
+        
+        if [ "${{ steps.deploy-hook.outputs.deployment_triggered }}" == "true" ]; then
+          echo "Deployment: Triggered ✅"
+        else
+          echo "Deployment: Not triggered ⚠️"
+        fi
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+        
