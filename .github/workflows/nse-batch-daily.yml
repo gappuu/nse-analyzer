@@ -1,3 +1,9 @@
+# ============================================
+# Updated NSE Batch Analysis with Vercel Blob
+# File: .github/workflows/nse-batch-daily.yml
+# Repository: nse-analyzer
+# ============================================
+
 name: NSE Daily Batch Analysis
 
 on:
@@ -49,45 +55,32 @@ jobs:
       run: cargo build --release
       
     - name: Run NSE Batch Analysis
-      timeout-minutes: 3  # Kill this step after 3 minutes (180 seconds)
+      timeout-minutes: 3
       working-directory: backend
       run: |
-        # Set environment for batch mode only
         export NSE_MODE=batch
         export EXCHANGE=nse
         
-        # Run the batch analysis and capture output
         ./target/release/nse-analyzer | tee nse_output.log
 
-        # Parse success/failure counts from Rust summary
         SUCCESS_COUNT=$(grep -oP '✓ Successful:\s*\K[0-9]+' nse_output.log || echo 0)
         FAILED_COUNT=$(grep -oP '✗ Failed:\s*\K[0-9]+' nse_output.log || echo 0)
 
         echo "SUCCESS_COUNT=$SUCCESS_COUNT" >> $GITHUB_ENV
         echo "FAILED_COUNT=$FAILED_COUNT" >> $GITHUB_ENV
         
-        # Create summary data for email body (not as file)
         if [ -f "batch_rules.json" ]; then
           echo "ANALYSIS_SUCCESS=true" >> $GITHUB_ENV
           
-          # Count total alerts and securities
           ALERT_COUNT=$(jq '[.[].alerts | length] | add // 0' batch_rules.json)
           SECURITY_COUNT=$(jq 'length' batch_rules.json)
           
           echo "ALERT_COUNT=$ALERT_COUNT" >> $GITHUB_ENV
           echo "SECURITY_COUNT=$SECURITY_COUNT" >> $GITHUB_ENV
           
-          # Get securities with alerts (names)
           SECURITIES_WITH_ALERTS=$(jq -r '.[].symbol' batch_rules.json | tr '\n' ', ' | sed 's/,$//')
           echo "SECURITIES_WITH_ALERTS=$SECURITIES_WITH_ALERTS" >> $GITHUB_ENV
           
-          # Create alert type breakdown with security names
-          echo "Creating alert breakdown table..."
-          echo "Debug: batch_rules.json content preview:"
-          jq -c '.[0:2]' batch_rules.json || echo "Failed to parse JSON"
-
-          # Generate table once into a variable
-          # NOTE: HUGE_OI_INCREASE / HUGE_OI_DECREASE are split by option_type (CE/PE)
           TABLE_DATA=$(jq -r '
             [.[].alerts[]
              | {
@@ -118,18 +111,11 @@ jobs:
             | "\(.alert_type)|\(.count)|\(.securities)"
           ' batch_rules.json)
 
-          echo "Debug: Generated table data:"
-          printf '%s\n' "$TABLE_DATA" | tee /tmp/debug_table.txt
-
-          # ✅ Actually store it as multiline env var
           {
             echo "ALERT_TABLE_DATA<<EOF"
             echo "$TABLE_DATA"
             echo "EOF"
           } >> "$GITHUB_ENV"
-          
-          echo "Debug: Generated table data:"
-          cat /tmp/debug_table.txt
           
         else
           echo "ANALYSIS_SUCCESS=false" >> $GITHUB_ENV
@@ -148,86 +134,68 @@ jobs:
         retention-days: 10
     
     # ============================================
-    # NEW: Sync batch_rules.json to nse_wt_web
+    # NEW: Upload to Vercel Blob & Trigger Deploy
     # ============================================
-    - name: Checkout nse_wt_web repository
+    - name: Setup Node.js
       if: ${{ env.ANALYSIS_SUCCESS == 'true' }}
-      uses: actions/checkout@v4
+      uses: actions/setup-node@v4
       with:
-        repository: gappuu/nse_wt_web
-        token: ${{ secrets.CROSS_REPO_TOKEN }}
-        path: nse_wt_web
-        ref: master  # Default branch is master, not main
+        node-version: '20'
     
-    - name: Copy batch_rules.json to nse_wt_web
+    - name: Install Vercel CLI and Blob SDK
       if: ${{ env.ANALYSIS_SUCCESS == 'true' }}
       run: |
-        # Ensure the data directory exists
-        mkdir -p nse_wt_web/frontend/public/data
-        
-        # Copy the generated file
-        cp backend/batch_rules.json nse_wt_web/frontend/public/data/batch_rules.json
-        
-        # Verify the copy
-        echo "✅ File copied successfully:"
-        ls -lh nse_wt_web/frontend/public/data/batch_rules.json
-        
-        # Show first few lines for verification
-        echo "Preview of copied file:"
-        head -n 5 nse_wt_web/frontend/public/data/batch_rules.json
+        npm install -g vercel@latest
+        npm install @vercel/blob
     
-    - name: Generate IST Timestamp for commit
+    - name: Upload batch_rules.json to Vercel Blob
+      if: ${{ env.ANALYSIS_SUCCESS == 'true' }}
+      working-directory: backend
+      run: |
+        cat > upload-blob.mjs << 'EOF'
+        import { put } from '@vercel/blob';
+        import { readFileSync } from 'fs';
+        
+        const content = readFileSync('batch_rules.json', 'utf-8');
+        
+        const blob = await put('data/batch_rules.json', content, {
+          access: 'public',
+          token: process.env.BLOB_READ_WRITE_TOKEN,
+        });
+        
+        console.log('✅ Uploaded to Vercel Blob');
+        console.log('URL:', blob.url);
+        console.log('Pathname:', blob.pathname);
+        
+        // Save URL to GitHub environment
+        const fs = require('fs');
+        fs.appendFileSync(process.env.GITHUB_ENV, `BLOB_URL=${blob.url}\n`);
+        EOF
+        
+        node upload-blob.mjs
+    
+    - name: Trigger Vercel Deployment
       if: ${{ env.ANALYSIS_SUCCESS == 'true' }}
       run: |
-        IST_TIME=$(TZ="Asia/Kolkata" date +"%d %b %y %H:%M")
-        echo "IST_COMMIT_TIME=$IST_TIME" >> $GITHUB_ENV
+        # Trigger deployment using Vercel Deploy Hook
+        curl -X POST "${{ secrets.VERCEL_DEPLOY_HOOK }}"
+        echo "✅ Vercel deployment triggered"
     
-    - name: Commit and push to nse_wt_web
-      if: ${{ env.ANALYSIS_SUCCESS == 'true' }}
-      working-directory: nse_wt_web
-      run: |
-        # Configure git
-        git config user.name "NSE Analyzer Bot"
-        git config user.email "nse-analyzer-bot@github-actions"
-        
-        # Check if there are actual changes
-        if git diff --quiet frontend/public/data/batch_rules.json; then
-          echo "ℹ️ No changes to batch_rules.json - skipping commit"
-        else
-          # Add and commit the file
-          git add frontend/public/data/batch_rules.json
-          
-          git commit -m "chore: update batch_rules.json [automated]
-
-          Generated by: NSE Analyzer workflow
-          Run ID: ${{ github.run_number }}
-          Timestamp: ${IST_COMMIT_TIME}
-          Alerts: ${ALERT_COUNT} across ${SECURITY_COUNT} securities
-
-          This update was automatically generated and pushed by the nse-analyzer daily batch job."
-          
-          # Push to remote
-          git push
-          
-          echo "✅ Successfully pushed batch_rules.json to nse_wt_web"
-          echo "🚀 Vercel deployment will be triggered automatically"
-        fi
-        
+    # Alternative: Use Vercel CLI to deploy (if you prefer)
+    # - name: Trigger Vercel Deployment via CLI
+    #   if: ${{ env.ANALYSIS_SUCCESS == 'true' }}
+    #   run: |
+    #     vercel deploy --prod --token=${{ secrets.VERCEL_TOKEN }} --yes
+    
     # ============================================
-    # END: Cross-repo sync
+    # END: Vercel Blob Upload
     # ============================================
         
     - name: Format Alert Table
       id: format-table
-      if: always()
+      if: failure()
       run: |
-        echo "Debug: ANALYSIS_SUCCESS = $ANALYSIS_SUCCESS"
-        echo "Debug: ALERT_TABLE_DATA (raw):"
-        printf '%s\n' "$ALERT_TABLE_DATA"
-
         if [ "$ANALYSIS_SUCCESS" = "true" ] && [ -n "$ALERT_TABLE_DATA" ]; then
-          echo "Formatting alert table as HTML..."
-
           html_table='<table border="1" cellpadding="4" cellspacing="0" style="border-collapse:collapse;font-family:monospace;font-size:12px;">
             <tr>
               <th align="left">Alert Type</th>
@@ -235,14 +203,10 @@ jobs:
               <th align="left">Securities</th>
             </tr>'
 
-          # ALERT_TABLE_DATA lines are like: ALERT_TYPE|count|SEC1,SEC2,...
           while IFS='|' read -r alert_type count securities; do
             [ -z "$alert_type" ] && continue
-
-            # Basic HTML escaping for &, <, >
-            esc_type=$(printf '%s' "$alert_type"   | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
-            esc_secs=$(printf '%s' "$securities"   | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
-
+            esc_type=$(printf '%s' "$alert_type" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+            esc_secs=$(printf '%s' "$securities" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
             html_table="${html_table}
             <tr>
               <td>${esc_type}</td>
@@ -251,9 +215,7 @@ jobs:
             </tr>"
           done <<< "$ALERT_TABLE_DATA"
 
-          html_table="${html_table}
-          </table>"
-
+          html_table="${html_table}</table>"
           formatted_output="$html_table"
         else
           if [ "$ANALYSIS_SUCCESS" = "true" ]; then
@@ -270,6 +232,7 @@ jobs:
         } >> "$GITHUB_OUTPUT"
 
     - name: Generate IST Timestamp
+      if: failure()
       run: |
         IST_TIME=$(TZ="Asia/Kolkata" date +"%d %b %y %H:%M")
         echo "IST_TIMESTAMP=$IST_TIME" >> $GITHUB_ENV
@@ -334,7 +297,7 @@ jobs:
         username: ${{ secrets.GMAIL_USERNAME }}
         password: ${{ secrets.GMAIL_PASSWORD }}
         subject: "🚨 NSE Analysis FAILED - ${{ env.IST_TIMESTAMP }}"
-        to: ${{ secrets.EMAIL_RECIPIENT }}
+        to: ${{ secrets.EMAIL_RECIPIENT }},${{ secrets.EMAIL_RECIPIENT_2 }}
         from: ${{ secrets.GMAIL_USERNAME }}
         body: |
           ⚠️ NSE Daily Analysis Failed
