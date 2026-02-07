@@ -157,7 +157,7 @@ jobs:
         repository: gappuu/nse_wt_web
         token: ${{ secrets.CROSS_REPO_TOKEN }}
         path: nse_wt_web
-        ref: main  # or your default branch
+        ref: master  # Default branch is master, not main
     
     - name: Copy batch_rules.json to nse_wt_web
       if: ${{ env.ANALYSIS_SUCCESS == 'true' }}
