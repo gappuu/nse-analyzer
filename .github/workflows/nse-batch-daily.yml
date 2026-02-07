@@ -3,6 +3,7 @@ name: NSE Daily Batch Analysis
 on:
   schedule:
     - cron: "0 5-9 * * 1-5" # 10:30–14:30 IST (Mon–Fri)
+    - cron: "30 10 * * 1-5" # 16:00 IST (Mon–Fri) - post-market analysis
   workflow_dispatch: # Allow manual trigger for testing
 
 env:
