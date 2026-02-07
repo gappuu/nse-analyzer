@@ -154,13 +154,15 @@ jobs:
       run: |
         cat > upload-blob.mjs << 'EOF'
         import { put } from '@vercel/blob';
-        import { readFileSync } from 'fs';
+        import { readFileSync, appendFileSync } from 'fs';
         
         const content = readFileSync('batch_rules.json', 'utf-8');
         
         const blob = await put('data/batch_rules.json', content, {
           access: 'public',
           token: process.env.BLOB_READ_WRITE_TOKEN,
+          addRandomSuffix: false,
+          allowOverwrite: true,
         });
         
         console.log('✅ Uploaded to Vercel Blob');
@@ -168,8 +170,7 @@ jobs:
         console.log('Pathname:', blob.pathname);
         
         // Save URL to GitHub environment
-        const fs = require('fs');
-        fs.appendFileSync(process.env.GITHUB_ENV, `BLOB_URL=${blob.url}\n`);
+        appendFileSync(process.env.GITHUB_ENV, `BLOB_URL=${blob.url}\n`);
         EOF
         
         node upload-blob.mjs
@@ -273,7 +274,7 @@ jobs:
                 <h3>📈 Alert Breakdown</h3>
                 ${{ steps.format-table.outputs.formatted_table }}
 
-                ${{ env.ANALYSIS_SUCCESS == 'true' && '<h3>🚀 Deployment Status</h3><p>✅ batch_rules.json has been pushed to nse_wt_web - Vercel deployment triggered automatically</p>' || '' }}
+                ${{ env.ANALYSIS_SUCCESS == 'true' && '<h3>🚀 Deployment Status</h3><p>✅ batch_rules.json has been pushed to Vercel Blob - Deployment triggered automatically</p>' || '' }}
 
                 ${{ env.ANALYSIS_SUCCESS != 'true' && '<h3>ℹ️ Troubleshooting (if failed)</h3><ul><li>NSE API timeout (90 second limit)</li><li>Network connectivity issues</li><li>NSE server problems</li><li>Market hours / trading session status</li></ul>' || '' }}
 
