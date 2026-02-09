@@ -4,7 +4,7 @@
 # Repository: nse-analyzer
 # ============================================
 
-name: NSE Daily Batch Analysis
+name: NSE Hourly Batch Analysis
 
 on:
   schedule:
