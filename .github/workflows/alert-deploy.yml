@@ -1,9 +1,9 @@
 # ============================================
-# File: .github/workflows/nse-batch-hourly.yml
+# File: .github/workflows/alert-deploy.yml
 # Repository: nse-analyzer
 # ============================================
 
-name: NSE Hourly Batch Analysis
+name: NSE Hourly Alerts
 
 on:
   schedule:
@@ -15,7 +15,7 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  hr_nse-batch-analysis:
+  alert-deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 10  # Kill entire job after 10 minutes
 
@@ -48,11 +48,11 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-cargo-
           
-    - name: Build NSE Analyzer
+    - name: Build Rust NSE Analyzer
       working-directory: backend
       run: cargo build --release
       
-    - name: Run NSE Batch Analysis
+    - name: Run Rust NSE Batch Analysis
       timeout-minutes: 3
       working-directory: backend
       run: |
