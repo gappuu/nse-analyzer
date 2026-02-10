@@ -6,9 +6,9 @@
 name: NSE Hourly Alerts
 
 on:
-  schedule:
-    - cron: "3 5-10 * * 1-5" # 10:33–15:33 IST (Mon–Fri)
-  workflow_dispatch: # Allow manual trigger for testing
+  # schedule:                     #// cron now in cloudflare via wrangler
+    # - cron: "3 5-10 * * 1-5"    #// 10:33–15:33 IST (Mon–Fri)
+  workflow_dispatch: 
 
 env:
   RUST_LOG: info
