@@ -230,21 +230,14 @@ impl NSECommands {
     }
 
     /// Process batch data and apply rules
-    /// Process batch data and apply rules
     async fn process_batch_data_and_rules(
         successful: Vec<(models::Security, models::OptionChain)>
     ) -> Result<()> {
         println!("{}", "Processing data and applying rules...".cyan());
         
-        // Create output directory
-        let output_dir = std::path::Path::new("processed_data");
-        if !output_dir.exists() {
-            std::fs::create_dir_all(output_dir)?;
-        }
-        
-        // Process all data and collect everything in memory
+        // Process all data and collect in a single structure
         let mut batch_for_rules = Vec::new();
-        let mut all_ticker_data = std::collections::HashMap::new();
+        let mut all_processed_data = Vec::new();
         
         for (security, chain) in successful.iter() {
             let (processed_data, spread) = processor::process_option_data(
@@ -269,7 +262,7 @@ impl NSECommands {
                 "data": processed_data.clone(),
             });
             
-            all_ticker_data.insert(security.symbol.clone(), ticker_data);
+            all_processed_data.push(ticker_data);
             
             batch_for_rules.push((
                 security.symbol.clone(),
@@ -280,15 +273,16 @@ impl NSECommands {
             ));
         }
         
-        // Write all files at once (sequentially but fast)
+        // Write single consolidated file
         let start = std::time::Instant::now();
-        for (symbol, data) in all_ticker_data.iter() {
-            let filename = format!("processed_data/{}.json", symbol);
-            std::fs::write(&filename, serde_json::to_string(data)?)?;  // Use to_string instead of to_string_pretty for speed
-        }
+        std::fs::write(
+            "batch_processed.json",
+            serde_json::to_string(&all_processed_data)?,
+        )?;
         let write_duration = start.elapsed();
         
-        println!("{} Saved {} ticker files in {:.2}s", "✓".green(), all_ticker_data.len(), write_duration.as_secs_f64());
+        println!("{} Saved batch_processed.json ({} securities) in {:.2}s", 
+                "✓".green(), all_processed_data.len(), write_duration.as_secs_f64());
         
         // Run rules
         let rules_outputs = rules::run_batch_rules(batch_for_rules);
@@ -314,6 +308,60 @@ impl NSECommands {
         Ok(())
     }
 
+    /// Split batch_processed.json into individual ticker files
+    pub async fn split_batch_file() -> Result<()> {
+        use rayon::prelude::*;
+        use serde_json::Value;
+        
+        println!("{}", "=".repeat(60).blue());
+        println!("{}", "Splitting batch file into individual ticker files".green().bold());
+        println!("{}", "=".repeat(60).blue());
+        println!();
+        
+        // Read the consolidated file
+        let start = std::time::Instant::now();
+        let content = std::fs::read_to_string("batch_processed.json")?;
+        let data: Vec<Value> = serde_json::from_str(&content)?;
+        
+        println!("{} Loaded {} securities in {:.2}s", "✓".green(), data.len(), start.elapsed().as_secs_f64());
+        
+        // Create output directory
+        let output_dir = std::path::Path::new("processed_data");
+        if !output_dir.exists() {
+            std::fs::create_dir_all(output_dir)?;
+            println!("{} Created output directory: processed_data/", "✓".green());
+        }
+        
+        // Split files in parallel using rayon
+        let split_start = std::time::Instant::now();
+        let files_created: Result<usize> = data
+            .par_iter()
+            .map(|ticker_data| {
+                // Extract symbol from the record
+                let symbol = ticker_data["record"]["symbol"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("Missing symbol"))?;
+                
+                let filename = format!("processed_data/{}.json", symbol);
+                std::fs::write(&filename, serde_json::to_string(ticker_data)?)?;
+                
+                Ok(1)
+            })
+            .try_fold(|| 0, |acc, result: Result<usize>| result.map(|v| acc + v))
+            .try_reduce(|| 0, |a, b| Ok(a + b));
+        
+        let files_created = files_created?;
+        let split_duration = split_start.elapsed();
+        
+        println!("{} Created {} files in {:.2}s", "✓".green(), files_created, split_duration.as_secs_f64());
+        println!("{} Total time: {:.2}s", "ℹ".blue(), start.elapsed().as_secs_f64());
+        println!();
+        println!("{}", "=".repeat(60).blue());
+        println!("{}", "Done!".green().bold());
+        println!("{}", "=".repeat(60).blue());
+        
+        Ok(())
+    }
     /// Print usage instructions
     pub fn print_usage() {
         eprintln!("Set NSE_MODE environment variable to control execution mode");

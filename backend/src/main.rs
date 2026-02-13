@@ -79,11 +79,21 @@ async fn run_batch_mode(config: &AppConfig) -> Result<()> {
     match config.exchange.as_str() {
         "nse" => {
             println!("{}", "Running NSE batch analysis...".green());
-            NSECommands::run_batch().await
+            NSECommands::run_batch().await?;
+            
+            // Split batch file into individual ticker files
+            split_batch_if_exists("batch_processed.json").await?;
+            
+            Ok(())
         }
         "mcx" => {
             println!("{}", "Running MCX batch analysis...".green());
-            MCXCommands::run_batch().await
+            MCXCommands::run_batch().await?;
+            
+            // Split batch file into individual ticker files
+            split_batch_if_exists("batch_processed.json").await?;
+            
+            Ok(())
         }
         "both" => {
             println!("{}", "Running batch analysis for both NSE and MCX...".green());
@@ -92,12 +102,22 @@ async fn run_batch_mode(config: &AppConfig) -> Result<()> {
             println!("\n{}", "Starting NSE batch analysis...".cyan());
             if let Err(e) = NSECommands::run_batch().await {
                 eprintln!("{} NSE batch failed: {}", "✗".red(), e);
+            } else {
+                // Split NSE batch file
+                if let Err(e) = split_batch_if_exists("batch_processed.json").await {
+                    eprintln!("{} NSE batch split failed: {}", "✗".red(), e);
+                }
             }
             
             // Then run MCX batch
             println!("\n{}", "Starting MCX batch analysis...".cyan());
             if let Err(e) = MCXCommands::run_batch().await {
                 eprintln!("{} MCX batch failed: {}", "✗".red(), e);
+            } else {
+                // Split MCX batch file
+                if let Err(e) = split_batch_if_exists("batch_processed.json").await {
+                    eprintln!("{} MCX batch split failed: {}", "✗".red(), e);
+                }
             }
             
             println!("\n{}", "Both analyses completed!".green());
@@ -109,6 +129,26 @@ async fn run_batch_mode(config: &AppConfig) -> Result<()> {
             std::process::exit(1);
         }
     }
+}
+
+/// Split batch_processed.json into individual ticker files if it exists
+async fn split_batch_if_exists(filename: &str) -> Result<()> {
+    // Check if batch_processed.json exists in current directory or backend/
+    let backend_path = format!("backend/{}", filename);
+    let paths = [
+        std::path::Path::new(filename),
+        std::path::Path::new(&backend_path),
+    ];
+    
+    for path in &paths {
+        if path.exists() {
+            println!("\n{} Found {}, splitting into individual files...", "→".cyan(), filename);
+            return NSECommands::split_batch_file().await;
+        }
+    }
+    
+    println!("{} No {} found, skipping split", "ℹ".blue(), filename);
+    Ok(())
 }
 
 /// Print server orchestration help
