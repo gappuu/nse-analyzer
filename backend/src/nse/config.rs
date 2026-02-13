@@ -27,7 +27,7 @@ pub fn nse_option_chain_url(typ: &str, symbol: &str, expiry: &str) -> String {
 // -----------------------------------------------
 // INDICES TO ADD
 // -----------------------------------------------
-pub const NSE_INDICES: &[&str] = &["NIFTY", "BANKNIFTY", "FINNIFTY"];
+pub const NSE_INDICES: &[&str] = &["NIFTY", "BANKNIFTY", "FINNIFTY","MIDCPNIFTY", "NIFTYNXT50"];
 
 // -----------------------------------------------
 // HTTP CLIENT CONFIG
