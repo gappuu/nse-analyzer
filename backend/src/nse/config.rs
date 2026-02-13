@@ -60,7 +60,7 @@ pub const RETRY_MAX_ATTEMPTS: usize = 5;
 // -----------------------------------------------
 // GITHUB ACTIONS TIMEOUT CONFIG
 // -----------------------------------------------
-pub const GITHUB_ACTIONS_TIMEOUT_SECS: u64 = 200;  // 200 second timeout for CI
+pub const GITHUB_ACTIONS_TIMEOUT_SECS: u64 = 400; 
 
 // -----------------------------------------------
 // CONCURRENCY LIMITS
