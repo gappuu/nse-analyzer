@@ -230,21 +230,21 @@ impl NSECommands {
     }
 
     /// Process batch data and apply rules
+    /// Process batch data and apply rules
     async fn process_batch_data_and_rules(
         successful: Vec<(models::Security, models::OptionChain)>
     ) -> Result<()> {
         println!("{}", "Processing data and applying rules...".cyan());
         
-        // Create output directory for individual ticker files
+        // Create output directory
         let output_dir = std::path::Path::new("processed_data");
         if !output_dir.exists() {
             std::fs::create_dir_all(output_dir)?;
-            println!("{} Created output directory: processed_data/", "✓".green());
         }
         
-        // Process each security's data
+        // Process all data and collect everything in memory
         let mut batch_for_rules = Vec::new();
-        let mut files_created = 0;
+        let mut all_ticker_data = std::collections::HashMap::new();
         
         for (security, chain) in successful.iter() {
             let (processed_data, spread) = processor::process_option_data(
@@ -252,12 +252,10 @@ impl NSECommands {
                 chain.records.underlying_value
             );
             
-            // Extract days_to_expiry from first processed option
             let days_to_expiry = processed_data.first()
                 .map(|opt| opt.days_to_expiry)
                 .unwrap_or(0);
             
-            // Create individual ticker JSON
             let ticker_data = serde_json::json!({
                 "record": {
                     "symbol": security.symbol,
@@ -271,15 +269,8 @@ impl NSECommands {
                 "data": processed_data.clone(),
             });
             
-            // Save individual ticker file
-            let filename = format!("processed_data/{}.json", security.symbol);
-            std::fs::write(
-                &filename,
-                serde_json::to_string_pretty(&ticker_data)?,
-            )?;
-            files_created += 1;
+            all_ticker_data.insert(security.symbol.clone(), ticker_data);
             
-            // Store for rules processing
             batch_for_rules.push((
                 security.symbol.clone(),
                 chain.records.timestamp.clone(),
@@ -289,12 +280,19 @@ impl NSECommands {
             ));
         }
         
-        println!("{} Saved {} individual ticker files to processed_data/", "✓".green(), files_created);
+        // Write all files at once (sequentially but fast)
+        let start = std::time::Instant::now();
+        for (symbol, data) in all_ticker_data.iter() {
+            let filename = format!("processed_data/{}.json", symbol);
+            std::fs::write(&filename, serde_json::to_string(data)?)?;  // Use to_string instead of to_string_pretty for speed
+        }
+        let write_duration = start.elapsed();
         
-        // Run rules on all securities
+        println!("{} Saved {} ticker files in {:.2}s", "✓".green(), all_ticker_data.len(), write_duration.as_secs_f64());
+        
+        // Run rules
         let rules_outputs = rules::run_batch_rules(batch_for_rules);
         
-        // Save rules output
         if !rules_outputs.is_empty() {
             std::fs::write(
                 "batch_rules.json",
@@ -310,8 +308,7 @@ impl NSECommands {
             println!("{} Total alerts: {}", "ℹ".blue(), total_alerts);
         } else {
             std::fs::write("batch_rules.json", "[]")?;
-            println!("{} No alerts found across all securities", "ℹ".blue());
-            println!("{} Created empty rules file: batch_rules.json", "✓".green());
+            println!("{} No alerts found", "ℹ".blue());
         }
 
         Ok(())
