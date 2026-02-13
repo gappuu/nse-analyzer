@@ -38,15 +38,10 @@ jobs:
         toolchain: stable
         
     - name: Cache Cargo registry
-      uses: actions/cache@v3
+      uses: Swatinem/rust-cache@v2
       with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          backend/target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-cargo-
+        workspaces: backend -> target
+        cache-on-failure: true
           
     - name: Build Rust NSE Analyzer
       working-directory: backend
