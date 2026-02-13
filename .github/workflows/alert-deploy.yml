@@ -146,35 +146,81 @@ jobs:
         npm install -g vercel@latest
         npm install @vercel/blob
     
-    - name: Upload batch_rules.json to Vercel Blob
+    - name: Upload batch_rules.json and processed_data to Vercel Blob
       if: ${{ env.ANALYSIS_SUCCESS == 'true' }}
       working-directory: backend
       env:
         BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
       run: |
         cat > upload-blob.mjs << 'EOF'
-        import { put } from '@vercel/blob';
-        import { readFileSync, appendFileSync } from 'fs';
+        import { put, list, del } from '@vercel/blob';
+        import { readFileSync, readdirSync, appendFileSync } from 'fs';
+        import { join } from 'path';
         
-        const content = readFileSync('batch_rules.json', 'utf-8');
+        // Step 1: Clean up old processed_data files
+        console.log('🧹 Cleaning up old processed_data files...');
+        const oldFiles = await list({
+          prefix: 'data/processed_data/',
+          token: process.env.BLOB_READ_WRITE_TOKEN,
+        });
         
-        const blob = await put('data/batch_rules.json', content, {
+        let deletedCount = 0;
+        for (const file of oldFiles.blobs) {
+          await del(file.url, { token: process.env.BLOB_READ_WRITE_TOKEN });
+          deletedCount++;
+        }
+        console.log(`✓ Deleted ${deletedCount} old files\n`);
+        
+        // Step 2: Upload batch_rules.json
+        const batchRulesContent = readFileSync('batch_rules.json', 'utf-8');
+        const batchRulesBlob = await put('data/batch_rules.json', batchRulesContent, {
           access: 'public',
           token: process.env.BLOB_READ_WRITE_TOKEN,
           addRandomSuffix: false,
           allowOverwrite: true,
         });
         
-        console.log('✅ Uploaded to Vercel Blob');
-        console.log('URL:', blob.url);
-        console.log('Pathname:', blob.pathname);
+        console.log('✅ Uploaded batch_rules.json to Vercel Blob');
+        console.log('URL:', batchRulesBlob.url);
+        console.log('Pathname:', batchRulesBlob.pathname);
         
-        // Save URL to GitHub environment
-        appendFileSync(process.env.GITHUB_ENV, `BLOB_URL=${blob.url}\n`);
+        // Step 3: Upload all files from processed_data directory
+        const processedDataDir = 'processed_data';
+        const files = readdirSync(processedDataDir);
+        
+        console.log(`\n📁 Uploading ${files.length} files from processed_data/...`);
+        
+        let uploadedCount = 0;
+        const uploadedFiles = [];
+        
+        for (const file of files) {
+          if (file.endsWith('.json')) {
+            const filePath = join(processedDataDir, file);
+            const fileContent = readFileSync(filePath, 'utf-8');
+            
+            const blob = await put(`data/processed_data/${file}`, fileContent, {
+              access: 'public',
+              token: process.env.BLOB_READ_WRITE_TOKEN,
+              addRandomSuffix: false,
+            });
+            
+            uploadedCount++;
+            uploadedFiles.push(file);
+            console.log(`✓ Uploaded ${file}`);
+          }
+        }
+        
+        console.log(`\n✅ Successfully uploaded ${uploadedCount} ticker files to Vercel Blob`);
+        console.log('Files:', uploadedFiles.join(', '));
+        
+        // Save info to GitHub environment
+        appendFileSync(process.env.GITHUB_ENV, `BLOB_BATCH_RULES_URL=${batchRulesBlob.url}\n`);
+        appendFileSync(process.env.GITHUB_ENV, `BLOB_TICKER_COUNT=${uploadedCount}\n`);
+        appendFileSync(process.env.GITHUB_ENV, `BLOB_DELETED_COUNT=${deletedCount}\n`);
         EOF
         
         node upload-blob.mjs
-    
+        
     - name: Trigger Vercel Deployment
       if: ${{ env.ANALYSIS_SUCCESS == 'true' }}
       run: |
