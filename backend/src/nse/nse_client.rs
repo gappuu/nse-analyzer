@@ -358,6 +358,116 @@ impl NSEClient {
             max_concurrent
         ));
         
+        // Separate equities from indices
+        let (equities, indices): (Vec<_>, Vec<_>) = securities
+            .into_iter()
+            .partition(|s| matches!(s.security_type, SecurityType::Equity));
+
+        println!("{} Equities: {}, Indices: {}", "ℹ".blue(), equities.len(), indices.len());
+
+        // Step 1: Fetch equity expiry once (using any equity as representative)
+        let equity_expiry = if !equities.is_empty() {
+            let _expiry_timer = Timer::start("Fetch Equity Expiry (shared)");
+            
+            // Use first equity to get standard expiry dates
+            let sample_symbol = &equities[0].symbol;
+            match self.fetch_contract_info(sample_symbol).await {
+                Ok(contract_info) => {
+                    match select_expiry(&contract_info.expiry_dates) {
+                        Ok(expiry) => {
+                            println!("{} Using equity expiry: {} (applies to all {} equities)", 
+                                "✓".green(), expiry.yellow(), equities.len());
+                            Some(expiry.clone())
+                        }
+                        Err(e) => {
+                            println!("{} Failed to select equity expiry: {}", "✗".red(), e);
+                            None
+                        }
+                    }
+                }
+                Err(e) => {
+                    println!("{} Failed to fetch equity contract info: {}", "✗".red(), e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        // Step 2: Process equities (no contract info fetch needed)
+        let equity_results = if let Some(expiry) = equity_expiry {
+            let _equity_timer = Timer::start(format!("Fetch {} Equity Chains", equities.len()));
+            Arc::clone(&self).fetch_option_chains_with_expiry(equities, &expiry, max_concurrent).await
+        } else if !equities.is_empty() {
+            println!("{} Skipping equities - no valid expiry found", "⚠".yellow());
+            equities.into_iter()
+                .map(|_sec| Err(anyhow!("No valid equity expiry")))
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        // Step 3: Process indices (each needs individual contract info)
+        let index_results = if !indices.is_empty() {
+            let _index_timer = Timer::start(format!("Fetch {} Index Chains", indices.len()));
+            Arc::clone(&self).fetch_option_chains_with_contract_info(indices, max_concurrent).await
+        } else {
+            Vec::new()
+        };
+
+        // Combine results
+        let mut all_results = Vec::new();
+        all_results.extend(equity_results);
+        all_results.extend(index_results);
+
+        all_results
+    }
+    /// Fetch option chains when expiry is already known (equities)
+    async fn fetch_option_chains_with_expiry(
+        self: Arc<Self>,
+        securities: Vec<Security>,
+        expiry: &str,
+        max_concurrent: usize,
+    ) -> Vec<Result<(Security, OptionChain)>> {
+        let semaphore = Arc::new(Semaphore::new(max_concurrent));
+        let expiry = expiry.to_string();
+        let mut handles = vec![];
+
+        for security in securities {
+            let client = Arc::clone(&self);
+            let sem = Arc::clone(&semaphore);
+            let expiry = expiry.clone();
+
+            let handle = tokio::spawn(async move {
+                let _permit = sem.acquire_owned().await
+                    .map_err(|e| anyhow::anyhow!("Semaphore error: {}", e))?;
+
+                // Direct fetch - no contract info needed
+                let chain = client.fetch_option_chain(&security, &expiry).await?;
+
+                Ok((security, chain))
+            });
+
+            handles.push(handle);
+        }
+
+        let mut results = vec![];
+        for handle in handles {
+            match handle.await {
+                Ok(res) => results.push(res),
+                Err(e) => results.push(Err(anyhow::anyhow!("Task error: {}", e))),
+            }
+        }
+
+        results
+    }
+
+    /// Fetch option chains with individual contract info (indices)
+    async fn fetch_option_chains_with_contract_info(
+        self: Arc<Self>,
+        securities: Vec<Security>,
+        max_concurrent: usize,
+    ) -> Vec<Result<(Security, OptionChain)>> {
         let semaphore = Arc::new(Semaphore::new(max_concurrent));
         let mut handles = vec![];
 
@@ -369,6 +479,7 @@ impl NSEClient {
                 let _permit = sem.acquire_owned().await
                     .map_err(|e| anyhow::anyhow!("Semaphore error: {}", e))?;
 
+                // Fetch contract info to get expiry
                 let contract_info = client.fetch_contract_info(&security.symbol).await?;
                 let expiry = select_expiry(&contract_info.expiry_dates)?;
                 let chain = client.fetch_option_chain(&security, expiry).await?;
