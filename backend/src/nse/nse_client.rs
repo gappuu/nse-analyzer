@@ -10,7 +10,12 @@ use tokio::sync::{Semaphore, RwLock};
 use tokio_retry::strategy::ExponentialBackoff;
 use tokio_retry::Retry;
 use chrono::{NaiveDate, NaiveTime, Local};
+use colored::Colorize;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
+
+// Import timing utilities
+use crate::utility::Timer;
 
 // -----------------------------------------------
 // CLIENT WRAPPER WITH SESSION STATE
@@ -90,12 +95,24 @@ impl NSEClient {
         // Acquire write lock and warmup
         let mut warmed = self.warmed_up.write().await;
         if !*warmed {
-            let _ = self.client
+            let timer = Timer::start("NSE Warmup");
+            
+            let response = self.client
                 .get(config::NSE_BASE_URL)
                 .header("Accept", config::HEADER_ACCEPT_HTML)
                 .send()
                 .await
                 .context("Failed to warm up NSE session")?;
+            
+            let status = response.status();
+            let elapsed = timer.elapsed_ms();
+            
+            println!(
+                "🌐 {} | {} | {}ms",
+                config::NSE_BASE_URL.bright_blue(),
+                format_status(status),
+                elapsed
+            );
             
             tokio::time::sleep(Duration::from_millis(config::WARMUP_DELAY_MS)).await;
             *warmed = true;
@@ -104,7 +121,8 @@ impl NSEClient {
         Ok(())
     }
 
-    /// Generic retry fetch with better error handling
+    
+    /// Generic retry fetch with better error handling and timing
     async fn fetch_json(&self, url: &str) -> Result<String> {
         self.warmup_if_needed().await?;
 
@@ -113,37 +131,66 @@ impl NSEClient {
             .max_delay(Duration::from_secs(config::RETRY_MAX_DELAY_SECS))
             .take(config::RETRY_MAX_ATTEMPTS);
 
-        Retry::spawn(backoff, || async {
-            let res = self.client
-                .get(url)
-                .header("Referer", config::HEADER_REFERER)
-                .header("X-Requested-With", config::HEADER_X_REQUESTED_WITH)
-                .send()
-                .await
-                .context("Request send failed")?;
+        // Use Arc<AtomicUsize> for thread-safe attempt counting
+        let attempt = Arc::new(AtomicUsize::new(0));
+        let url_owned = url.to_string(); // Clone URL for closure
+        
+        Retry::spawn(backoff, || {
+            let attempt = Arc::clone(&attempt);
+            let url = url_owned.clone();
+            let client = self.client.clone();
+            
+            async move {
+                let current_attempt = attempt.fetch_add(1, Ordering::SeqCst) + 1;
+                let timer = Timer::silent(format!("Fetch attempt {}", current_attempt));
+                
+                let res = client
+                    .get(&url)
+                    .header("Referer", config::HEADER_REFERER)
+                    .header("X-Requested-With", config::HEADER_X_REQUESTED_WITH)
+                    .send()
+                    .await
+                    .context("Request send failed")?;
 
-            let status = res.status();
+                let status = res.status();
+                let elapsed = timer.elapsed_ms();
 
-            // Handle different status codes
-            if status.is_success() {
-                let text = res.text().await.context("Failed to read body")?;
+                // Log request with status and timing
+                let retry_indicator = if current_attempt > 1 {
+                    format!(" (retry {})", current_attempt).yellow().to_string()
+                } else {
+                    String::new()
+                };
 
-                // Validate JSON
-                let trimmed = text.trim();
-                if !trimmed.starts_with('{') && !trimmed.starts_with('[') {
-                    let preview: String = text.chars().take(200).collect();
-                    anyhow::bail!("Non-JSON response: {}", preview);
+                println!(
+                    "🌐 {} | {} | {}ms{}",
+                    truncate_url(&url, 80).bright_blue(),
+                    format_status(status),
+                    elapsed,
+                    retry_indicator
+                );
+
+                // Handle different status codes
+                if status.is_success() {
+                    let text = res.text().await.context("Failed to read body")?;
+
+                    // Validate JSON
+                    let trimmed = text.trim();
+                    if !trimmed.starts_with('{') && !trimmed.starts_with('[') {
+                        let preview: String = text.chars().take(200).collect();
+                        anyhow::bail!("Non-JSON response: {}", preview);
+                    }
+
+                    Ok(text)
+                } else if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+                    // Retry on server errors and rate limits
+                    anyhow::bail!("Retryable error: {}", status)
+                } else {
+                    // Fail fast on client errors
+                    let body = res.text().await.unwrap_or_default();
+                    let preview: String = body.chars().take(200).collect();
+                    anyhow::bail!("Client error {}: {}", status, preview)
                 }
-
-                Ok(text)
-            } else if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
-                // Retry on server errors and rate limits
-                anyhow::bail!("Retryable error: {}", status)
-            } else {
-                // Fail fast on client errors
-                let body = res.text().await.unwrap_or_default();
-                let preview: String = body.chars().take(200).collect();
-                anyhow::bail!("Client error {}: {}", status, preview)
             }
         })
         .await
@@ -154,6 +201,8 @@ impl NSEClient {
     // STEP 1: FETCH FNO LIST
     // -----------------------------------------------
     pub async fn fetch_fno_list(&self) -> Result<Vec<Security>> {
+        let _timer = Timer::start("1. Fetch FNO List");
+        
         let text = self.fetch_json(config::NSE_API_MASTER_QUOTE).await?;
         
         let symbols: Vec<String> = serde_json::from_str(&text)
@@ -176,6 +225,8 @@ impl NSEClient {
     // STEP 2: FETCH CONTRACT INFO
     // -----------------------------------------------
     pub async fn fetch_contract_info(&self, symbol: &str) -> Result<ContractInfo> {
+        // let _timer = Timer::start(format!("2. Fetch Contract Info: {}", symbol));
+        
         let url = config::nse_contract_info_url(symbol);
         let text = self.fetch_json(&url).await?;
         let info: ContractInfo = serde_json::from_str(&text)
@@ -192,6 +243,8 @@ impl NSEClient {
         security: &Security,
         expiry: &str,
     ) -> Result<OptionChain> {
+        // let _timer = Timer::start(format!("3. Fetch Option Chain: {} {}", security.symbol, expiry));
+        
         let typ = match security.security_type {
             SecurityType::Equity => "Equity",
             SecurityType::Indices => "Indices",
@@ -213,6 +266,8 @@ impl NSEClient {
         symbol: &str,
         expiry: &str,
     ) -> Result<Value> {
+        let _timer = Timer::start(format!("Fetch Futures: {} {}", symbol, expiry));
+        
         let url = format!(
             "{}/api/NextApi/apiClient/GetQuoteApi?functionName=getSymbolDerivativesData&symbol={}&instrumentType=FUT&expiryDt={}",
             config::NSE_BASE_URL,
@@ -234,21 +289,23 @@ impl NSEClient {
         &self,
         symbol: &str,
         security_type: &SecurityType,
-        instrument_type: &str, // "OPTSTK", "FUTSTK", "OPTIDX", "FUTIDX"
+        instrument_type: &str,
         year: Option<&str>,
         expiry: &str,
         strike_price: Option<&str>,
-        option_type: Option<&str>, // "CE" or "PE"
+        option_type: Option<&str>,
         from_date: &str,
         to_date: &str,
     ) -> Result<Value> {
+        let _timer = Timer::start(format!("Fetch Historical: {} {}", symbol, instrument_type));
+        
         // Determine instrument type based on security type and instrument
         let instype = match (security_type, instrument_type) {
             (SecurityType::Equity, "OPTIONS") => "OPTSTK",
             (SecurityType::Equity, "FUTURES") => "FUTSTK", 
             (SecurityType::Indices, "OPTIONS") => "OPTIDX",
             (SecurityType::Indices, "FUTURES") => "FUTIDX",
-            _ => instrument_type, // Use as provided if it's already in correct format
+            _ => instrument_type,
         };
 
         let mut url = format!(
@@ -295,6 +352,12 @@ impl NSEClient {
         securities: Vec<Security>,
         max_concurrent: usize,
     ) -> Vec<Result<(Security, OptionChain)>> {
+        let _timer = Timer::start(format!(
+            "Batch Fetch {} Option Chains (concurrency: {})",
+            securities.len(),
+            max_concurrent
+        ));
+        
         let semaphore = Arc::new(Semaphore::new(max_concurrent));
         let mut handles = vec![];
 
@@ -303,22 +366,11 @@ impl NSEClient {
             let sem = Arc::clone(&semaphore);
 
             let handle = tokio::spawn(async move {
-                // Acquire permit - handle error properly
                 let _permit = sem.acquire_owned().await
                     .map_err(|e| anyhow::anyhow!("Semaphore error: {}", e))?;
 
-                // Get contract info
                 let contract_info = client.fetch_contract_info(&security.symbol).await?;
-                
-                // // Use nearest (first) expiry
-                // let expiry = contract_info
-                //     .expiry_dates
-                //     .first()
-                //     .context("No expiry dates found")?;
-
                 let expiry = select_expiry(&contract_info.expiry_dates)?;
-
-                // Get option chain
                 let chain = client.fetch_option_chain(&security, expiry).await?;
 
                 Ok((security, chain))
@@ -345,7 +397,6 @@ impl NSEClient {
 fn build_client() -> Result<Client> {
     let mut headers = header::HeaderMap::new();
     
-    // Rotating Accept-Language headers (fingerprint avoidance)
     let lang = config::ACCEPT_LANGUAGES.choose(&mut thread_rng()).unwrap();
     headers.insert(
         header::ACCEPT_LANGUAGE, 
@@ -355,9 +406,40 @@ fn build_client() -> Result<Client> {
 
     Ok(Client::builder()
         .default_headers(headers)
-        .cookie_store(true) // crucial for NSE
+        .cookie_store(true)
         .user_agent(config::USER_AGENT)
         .timeout(config::HTTP_TIMEOUT)
         .build()
         .context("Failed to build HTTP client")?)
+}
+
+// -----------------------------------------------
+// HELPER FUNCTIONS FOR DISPLAY
+// -----------------------------------------------
+
+/// Format HTTP status code with color
+fn format_status(status: StatusCode) -> String {
+    let code = status.as_u16();
+    let status_str = format!("{}", code);
+    
+    if status.is_success() {
+        status_str.green().to_string()
+    } else if status.is_client_error() {
+        status_str.yellow().to_string()
+    } else if status.is_server_error() {
+        status_str.red().to_string()
+    } else {
+        status_str.to_string()
+    }
+}
+
+/// Truncate URL for display
+fn truncate_url(url: &str, max_len: usize) -> String {
+    let trimmed: String = url.chars().skip(24).collect();
+
+    if trimmed.len() <= max_len {
+        trimmed
+    } else {
+        format!("{}...", &trimmed[..max_len])
+    }
 }

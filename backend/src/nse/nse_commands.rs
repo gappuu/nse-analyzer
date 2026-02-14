@@ -8,6 +8,7 @@ use super::nse_api_server;
 use anyhow::Result;
 use colored::Colorize;
 use std::sync::Arc;
+use crate::utility::{Timer, AggregateTimer};
 
 /// NSE Command Handler - encapsulates all NSE-related operations
 pub struct NSECommands;
@@ -15,6 +16,8 @@ pub struct NSECommands;
 impl NSECommands {
     /// Run batch fetch for all FNO securities
     pub async fn run_batch() -> Result<()> {
+        let _total_timer = Timer::start("Total Batch Processing");
+        
         println!("{}", "=".repeat(60).blue());
         println!("{}", "NSE Batch Processor".green().bold());
         println!("{}", "=".repeat(60).blue());
@@ -23,12 +26,16 @@ impl NSECommands {
         let client = Arc::new(NSEClient::new()?);
 
         // Step 1: Fetch all FNO securities
-        println!("{}", "Step 1: Fetching all FNO securities...".cyan());
-        let securities = client.fetch_fno_list().await?;
-        println!("{} Found {} securities", "✓".green(), securities.len());
-        println!();
+        let securities = {
+            let _step1_timer = Timer::start("Step 1: Fetch FNO List");
+            println!("{}", "Step 1: Fetching all FNO securities...".cyan());
+            let securities = client.fetch_fno_list().await?;
+            println!("{} Found {} securities", "✓".green(), securities.len());
+            println!();
+            securities
+        };
 
-        // Step 2: Bulk process all securities with timeout handling
+        // Step 2: Bulk process all securities
         println!("{}", "Step 2: Processing all securities...".cyan());
         
         let max_concurrent = if config::is_ci_environment() {
@@ -41,9 +48,9 @@ impl NSECommands {
         
         println!();
 
-        let start_time = std::time::Instant::now();
-        
-        // Wrap the batch processing with a timeout for CI environments
+        let (results, step2_elapsed) = {
+            let step2_timer = Timer::silent("Step 2");
+            
         let results = if config::is_ci_environment() {
             println!("{} CI timeout enabled: {} seconds", "⏱".yellow(), config::GITHUB_ACTIONS_TIMEOUT_SECS);
             
@@ -57,19 +64,21 @@ impl NSECommands {
                 Err(_) => {
                     println!("{} Timeout reached after {} seconds - stopping analysis", "⚠".red(), config::GITHUB_ACTIONS_TIMEOUT_SECS);
                     println!("{} This may indicate NSE API issues or network problems", "ℹ".blue());
-                    
-                    // Create empty results vector matching the securities count
                     securities.iter().map(|_| Err(anyhow::anyhow!("Timeout"))).collect()
                 }
             }
         } else {
-            // No timeout for local development
             client.fetch_all_option_chains(securities.clone(), max_concurrent).await
         };
-
-        let elapsed = start_time.elapsed();
         
-        // Step 3: Process results
+        let elapsed = step2_timer.elapsed();
+        println!("⏱️  Step 2: Fetch All Option Chains - {:.2}s", elapsed.as_secs_f64());
+        (results, elapsed)
+    };
+    
+    // Step 3: Process results
+    let (successful, failed, timeout_count) = {
+        let _step3_timer = Timer::start("Step 3: Collect Results");
         let mut successful = Vec::new();
         let mut failed = Vec::new();
         let mut timeout_count = 0;
@@ -78,7 +87,7 @@ impl NSECommands {
             match result {
                 Ok((_, chain)) => {
                     successful.push((security.clone(), chain.clone()));
-                    print!("{}", ".".green());
+                    // print!("{}", ".".green());
                 }
                 Err(e) => {
                     if e.to_string().contains("Timeout") {
@@ -91,11 +100,12 @@ impl NSECommands {
                 }
             }
         }
-        
         println!("\n");
+        (successful, failed, timeout_count)
+    };
 
         // Step 4: Display summary
-        Self::display_batch_summary(&successful, &failed, timeout_count, elapsed, &securities);
+        Self::display_batch_summary(&successful, &failed, timeout_count, step2_elapsed, &securities);
 
         // Step 5: Process data and run rules
         Self::process_batch_data_and_rules(successful).await?;
@@ -107,9 +117,10 @@ impl NSECommands {
 
         Ok(())
     }
-
     /// Run single security fetch (for API endpoints only - not used in GitHub Actions)
     pub async fn run_single(symbol: &str, expiry: &str) -> Result<()> {
+        let _total_timer = Timer::start(format!("Single Security: {}", symbol));
+        
         println!("{}", "=".repeat(60).blue());
         println!("{}", "NSE Single Security Fetch".green().bold());
         println!("{}", "=".repeat(60).blue());
@@ -117,7 +128,6 @@ impl NSECommands {
 
         let client = NSEClient::new()?;
 
-        // Determine security type
         let security = if config::NSE_INDICES.contains(&symbol) {
             models::Security::index(symbol.to_string())
         } else {
@@ -128,39 +138,44 @@ impl NSECommands {
         println!("{} Expiry: {}", "→".cyan(), expiry.yellow());
         println!();
 
-        let chain = client.fetch_option_chain(&security, expiry).await?;
+        let chain = {
+            let _fetch_timer = Timer::start("Fetch Option Chain");
+            client.fetch_option_chain(&security, expiry).await?
+        };
 
-        // Display results
         Self::display_single_results(symbol, &chain, expiry);
 
-        // Process the data
-        let (processed_data, spread) = processor::process_option_data(
-            chain.filtered.data.clone(),
-            chain.records.underlying_value
-        );
+        let (processed_data, spread) = {
+            let _process_timer = Timer::start("Process Option Data");
+            processor::process_option_data(
+                chain.filtered.data.clone(),
+                chain.records.underlying_value
+            )
+        };
 
-        // Extract days_to_expiry from first processed option
         let days_to_expiry = processed_data.first()
             .map(|opt| opt.days_to_expiry)
             .unwrap_or(0);
 
-        // Print results
         println!("{} Days to expiry: {}", "ℹ".blue(), days_to_expiry);
         
-        // Run rules on processed data
-        let rules_output = rules::run_rules(
-            &processed_data,
+        let rules_output = {
+            let _rules_timer = Timer::start("Run Rules Engine");
+            rules::run_rules(
+                &processed_data,
             symbol.to_string(),
             chain.records.timestamp.clone(),
             chain.records.underlying_value,
             spread,
-        );
+            )
+        };
         
         if let Some(output) = rules_output {
             println!("{} Total alerts: {}", "ℹ".blue(), output.alerts.len());
         } else {
             println!("{} No alerts found", "ℹ".blue());
         }
+        
         println!("{}", "=".repeat(60).blue());
 
         Ok(())
@@ -182,7 +197,7 @@ impl NSECommands {
         failed: &[(String, String)],
         timeout_count: i32,
         elapsed: std::time::Duration,
-        securities: &[models::Security],
+        _securities: &[models::Security],
     ) {
         println!("{}", "=".repeat(60).blue());
         println!("{}", "Summary".cyan().bold());
@@ -196,8 +211,10 @@ impl NSECommands {
         
         println!("{} Time taken: {:.2}s", "⏱".yellow(), elapsed.as_secs_f64());
         
-        if securities.len() > 0 {
-            println!("{} Avg time per security: {:.2}s", "⏱".yellow(), elapsed.as_secs_f64() / securities.len() as f64);
+        if successful.len() > 0 {
+            println!("{} Avg time per security: {:.2}s", "📊".to_string(), elapsed.as_secs_f64() / successful.len() as f64);
+            let requests_per_sec = successful.len() as f64 / elapsed.as_secs_f64();
+            println!("{} Throughput: {:.2} securities/sec", "⚡".to_string(), requests_per_sec);
         }
         
         println!();
@@ -233,24 +250,28 @@ impl NSECommands {
     async fn process_batch_data_and_rules(
         successful: Vec<(models::Security, models::OptionChain)>
     ) -> Result<()> {
+        let _total_timer = Timer::start("Step 4: Process Data & Apply Rules");
         println!("{}", "Processing data and applying rules...".cyan());
         
-        // Process each security's data
+        let mut process_timer = AggregateTimer::new("Option Data Processing");
+        
         let mut processed_batch = Vec::new();
         let mut batch_for_rules = Vec::new();
         
         for (security, chain) in successful.iter() {
+            let item_timer = Timer::silent("process_item");
+            
             let (processed_data, spread) = processor::process_option_data(
                 chain.filtered.data.clone(),
                 chain.records.underlying_value
             );
             
-            // Extract days_to_expiry from first processed option (they should all be the same)
+            process_timer.record(item_timer.elapsed());
+            
             let days_to_expiry = processed_data.first()
                 .map(|opt| opt.days_to_expiry)
                 .unwrap_or(0);
             
-            // Store for JSON output
             processed_batch.push(serde_json::json!({
                 "record": {
                     "symbol": security.symbol,
@@ -264,20 +285,25 @@ impl NSECommands {
                 "data": processed_data.clone(),
             }));
             
-            // Store for rules processing - now includes spread
             batch_for_rules.push((
                 security.symbol.clone(),
                 chain.records.timestamp.clone(),
                 chain.records.underlying_value,
                 processed_data,
-                spread,  // Add spread to the tuple
+                spread,
             ));
         }
         
-        // Run rules on all securities
-        let rules_outputs = rules::run_batch_rules(batch_for_rules);
+        println!();
+        process_timer.summary();
         
-        // Save rules output
+        let rules_outputs = {
+            let _rules_timer = Timer::start("Run Rules Engine");
+            rules::run_batch_rules(batch_for_rules)
+        };
+        
+        {
+            let _save_timer = Timer::start("Save Rules Output");
         if !rules_outputs.is_empty() {
             std::fs::write(
                 "batch_rules.json",
@@ -292,15 +318,14 @@ impl NSECommands {
             println!("{} Securities with alerts: {}", "ℹ".blue(), rules_outputs.len());
             println!("{} Total alerts: {}", "ℹ".blue(), total_alerts);
         } else {
-            // Create empty file for consistency
             std::fs::write("batch_rules.json", "[]")?;
             println!("{} No alerts found across all securities", "ℹ".blue());
             println!("{} Created empty rules file: batch_rules.json", "✓".green());
         }
+        }
 
         Ok(())
     }
-
     /// Print usage instructions
     pub fn print_usage() {
         eprintln!("Set NSE_MODE environment variable to control execution mode");
