@@ -5,7 +5,7 @@ use super::models;
 use super::rules;
 use super::nse_api_server;
 
-use anyhow::Result;
+use anyhow::{Result, Context};
 use colored::Colorize;
 use std::sync::Arc;
 use crate::utility::{Timer, AggregateTimer};
@@ -254,6 +254,14 @@ impl NSECommands {
         println!("{}", "Processing data and applying rules...".cyan());
         
         let mut process_timer = AggregateTimer::new("Option Data Processing");
+        let mut write_timer = AggregateTimer::new("File Write Operations");
+        
+        // Create output directory for individual ticker files
+        let output_dir = std::path::Path::new("processed_data");
+        if !output_dir.exists() {
+            std::fs::create_dir_all(output_dir)
+                .context("Failed to create processed_data directory")?;
+        }
         
         let mut processed_batch = Vec::new();
         let mut batch_for_rules = Vec::new();
@@ -272,19 +280,42 @@ impl NSECommands {
                 .map(|opt| opt.days_to_expiry)
                 .unwrap_or(0);
             
-            processed_batch.push(serde_json::json!({
+            // Create record structure
+            let record = serde_json::json!({
                 "record": {
                     "symbol": security.symbol,
+                    // "security_type": match security.security_type {
+                    //     models::SecurityType::Equity => "Equity",
+                    //     models::SecurityType::Indices => "Index",
+                    // },
                     "timestamp": chain.records.timestamp,
                     "underlying_value": chain.records.underlying_value,
                     "spread": spread,
                     "days_to_expiry": days_to_expiry,
                     "ce_oi": chain.filtered.ce_totals.total_oi,
                     "pe_oi": chain.filtered.pe_totals.total_oi,
+                    // "ce_change_in_oi": chain.filtered.ce_totals.total_change_in_oi,
+                    // "pe_change_in_oi": chain.filtered.pe_totals.total_change_in_oi,
                 },
                 "data": processed_data.clone(),
-            }));
+            });
             
+            // Write individual ticker file
+            let write_item_timer = Timer::silent("write_file");
+            let filename = format!("{}.json", security.symbol);
+            let filepath = output_dir.join(&filename);
+            
+            std::fs::write(
+                &filepath,
+                serde_json::to_string_pretty(&record)?,
+            ).with_context(|| format!("Failed to write {}", filename))?;
+            
+            write_timer.record(write_item_timer.elapsed());
+            
+            // Store for batch processing
+            processed_batch.push(record);
+            
+            // Store for rules processing
             batch_for_rules.push((
                 security.symbol.clone(),
                 chain.records.timestamp.clone(),
@@ -296,6 +327,14 @@ impl NSECommands {
         
         println!();
         process_timer.summary();
+        write_timer.summary();
+        
+        println!("{} Written {} ticker files to {}/", 
+            "✓".green(), 
+            successful.len(), 
+            output_dir.display().to_string().yellow()
+        );
+        println!();
         
         let rules_outputs = {
             let _rules_timer = Timer::start("Run Rules Engine");
@@ -326,6 +365,7 @@ impl NSECommands {
 
         Ok(())
     }
+   
     /// Print usage instructions
     pub fn print_usage() {
         eprintln!("Set NSE_MODE environment variable to control execution mode");

@@ -17,7 +17,7 @@ env:
 jobs:
   alert-deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 10  # Kill entire job after 10 minutes
+    timeout-minutes: 12  # Kill entire job after 10 minutes
 
     env:
       ANALYSIS_SUCCESS: "false"
@@ -38,22 +38,17 @@ jobs:
         toolchain: stable
         
     - name: Cache Cargo registry
-      uses: actions/cache@v3
+      uses: Swatinem/rust-cache@v2
       with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          backend/target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-cargo-
+        workspaces: backend -> target
+        cache-on-failure: true
           
     - name: Build Rust NSE Analyzer
       working-directory: backend
       run: cargo build --release
       
     - name: Run Rust NSE Batch Analysis
-      timeout-minutes: 3
+      timeout-minutes: 8
       working-directory: backend
       run: |
         export NSE_MODE=batch

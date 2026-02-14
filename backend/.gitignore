@@ -27,4 +27,5 @@ batch_rules.json
 batch_rules_bk.json
 mcx_batch_results.json
 
-processed_data/
+processed_data_bk/
+processed_data_v1/
