@@ -128,7 +128,14 @@ impl NSEClient {
             .max_delay(Duration::from_secs(config::RETRY_MAX_DELAY_SECS))
             .take(max_attempts);
 
-        Retry::spawn(backoff, || async {
+        // TIMING: Track request duration
+        let request_start = std::time::Instant::now();
+        let mut attempt_count = 0;
+
+        let result = Retry::spawn(backoff, || async {
+            attempt_count += 1;
+            let fetch_start = std::time::Instant::now();
+            
             let res = self.client
                 .get(url)
                 .header("Referer", config::HEADER_REFERER)
@@ -137,23 +144,35 @@ impl NSEClient {
                 .await
                 .context("Request send failed")?;
 
+            let send_duration = fetch_start.elapsed();
             let status = res.status();
             
-            // OPTIMIZATION: Minimal logging in CI for speed
-            if config::is_ci_environment() && !status.is_success() {
-                eprintln!("⚠️  {} - Status: {}", url.split('?').next().unwrap_or(url), status);
-            }
-
+            // TIMING: Log request timing in CI
             if config::is_ci_environment() {
-                println!("\n{}", "=".repeat(80));
-                println!("{} URL: {}", "→", url);
-                println!("{} Status: {} {}", "→", status.as_u16(), status.canonical_reason().unwrap_or("Unknown"));
+                let url_path = url.split('?').next().unwrap_or(url)
+                    .trim_start_matches("https://www.nseindia.com");
+                
+                if status.is_success() {
+                    println!("⏱️  {} - {}ms (attempt {}) - Status: {}", 
+                        url_path, send_duration.as_millis(), attempt_count, status);
+                } else {
+                    eprintln!("⚠️  {} - {}ms (attempt {}) - Status: {}", 
+                        url_path, send_duration.as_millis(), attempt_count, status);
+                }
             }
 
             if status.is_success() {
+                let body_start = std::time::Instant::now();
                 let text = res.text().await.context("Failed to read body")?;
+                let body_duration = body_start.elapsed();
 
-                // OPTIMIZATION: Fast validation without verbose logging
+                // TIMING: Log body read time if significant
+                if config::is_ci_environment() && body_duration.as_millis() > 100 {
+                    println!("   📥 Body read: {}ms (size: {} bytes)", 
+                        body_duration.as_millis(), text.len());
+                }
+
+                // Fast validation without verbose logging
                 let trimmed = text.trim();
                 if !trimmed.starts_with('{') && !trimmed.starts_with('[') {
                     anyhow::bail!("Non-JSON response");
@@ -166,7 +185,18 @@ impl NSEClient {
                 anyhow::bail!("Client error {}", status)
             }
         })
-        .await
+        .await;
+
+        // TIMING: Log total request time
+        let total_duration = request_start.elapsed();
+        if config::is_ci_environment() && total_duration.as_millis() > 500 {
+            let url_path = url.split('?').next().unwrap_or(url)
+                .trim_start_matches("https://www.nseindia.com");
+            println!("🐌 SLOW REQUEST: {} - {}ms total (retries: {})", 
+                url_path, total_duration.as_millis(), attempt_count);
+        }
+
+        result
     }
 
     // -----------------------------------------------
@@ -367,11 +397,15 @@ impl NSEClient {
             }
             
             let client = Arc::clone(&self);
+            let phase1_start = std::time::Instant::now();
+            
             let result = async move {
                 let expiry = client.fetch_contract_info_with_cache(&first_equity).await?;
                 let chain = client.fetch_option_chain(&first_equity, &expiry).await?;
                 Ok((first_equity, chain))
             }.await;
+            
+            let phase1_duration = phase1_start.elapsed();
             
             // Check if cache was populated
             let cache_populated = self.cached_equity_expiry.read().await.is_some();
@@ -379,8 +413,10 @@ impl NSEClient {
             if config::is_ci_environment() {
                 if cache_populated {
                     if let Ok((ref sec, _)) = result {
-                        println!("{} Expiry cached from '{}' - switching to parallel mode (concurrency: {})", 
-                            "⚡".to_string(), sec.symbol, max_concurrent);
+                        println!("{} Phase 1 complete: {}ms - Expiry cached from '{}'", 
+                            "⚡".to_string(), phase1_duration.as_millis(), sec.symbol);
+                        println!("{} Phase 2 starting: {} securities in parallel (concurrency: {})", 
+                            "🚀".to_string(), remaining_securities.len(), max_concurrent);
                     }
                 } else {
                     println!("{} Cache not populated, proceeding with parallel mode anyway", 
@@ -392,15 +428,27 @@ impl NSEClient {
         }
         
         // OPTIMIZATION: Now process remaining securities in parallel
+        let phase2_start = std::time::Instant::now();
+        let remaining_count = remaining_securities.len();
+        
         let parallel_results: Vec<Result<(Security, OptionChain)>> = stream::iter(remaining_securities)
             .map(|security| {
                 let client = Arc::clone(&self);
                 async move {
+                    let security_start = std::time::Instant::now();
+                    
                     // Fetch expiry (will use cache for equities after first one)
                     let expiry = client.fetch_contract_info_with_cache(&security).await?;
                     
                     // Fetch option chain
                     let chain = client.fetch_option_chain(&security, &expiry).await?;
+                    
+                    let security_duration = security_start.elapsed();
+                    
+                    // Log slow securities in CI
+                    if config::is_ci_environment() && security_duration.as_millis() > 2000 {
+                        println!("🐌 Slow security: {} - {}ms", security.symbol, security_duration.as_millis());
+                    }
                     
                     Ok((security, chain))
                 }
@@ -408,6 +456,19 @@ impl NSEClient {
             .buffer_unordered(max_concurrent) // Full parallelism for remaining
             .collect()
             .await;
+        
+        let phase2_duration = phase2_start.elapsed();
+        
+        if config::is_ci_environment() && remaining_count > 0 {
+            let avg_per_security = phase2_duration.as_millis() / remaining_count as u128;
+            let throughput = remaining_count as f64 / phase2_duration.as_secs_f64();
+            
+            println!("{} Phase 2 complete: {}ms total", 
+                "✅".to_string(), phase2_duration.as_millis());
+            println!("   • Processed {} securities", remaining_count);
+            println!("   • Avg per security: {}ms", avg_per_security);
+            println!("   • Throughput: {:.2} securities/sec", throughput);
+        }
         
         // Combine results
         results.extend(parallel_results);
