@@ -55,10 +55,8 @@ jobs:
         export EXCHANGE=nse
         
         ./target/release/nse-analyzer | tee nse_output.log
-
         SUCCESS_COUNT=$(grep -oP '✓ Successful:\s*\K[0-9]+' nse_output.log || echo 0)
         FAILED_COUNT=$(grep -oP '✗ Failed:\s*\K[0-9]+' nse_output.log || echo 0)
-
         echo "SUCCESS_COUNT=$SUCCESS_COUNT" >> $GITHUB_ENV
         echo "FAILED_COUNT=$FAILED_COUNT" >> $GITHUB_ENV
         
@@ -103,7 +101,6 @@ jobs:
             | .[]
             | "\(.alert_type)|\(.count)|\(.securities)"
           ' batch_rules.json)
-
           {
             echo "ALERT_TABLE_DATA<<EOF"
             echo "$TABLE_DATA"
@@ -117,7 +114,6 @@ jobs:
           echo "SECURITIES_WITH_ALERTS=None" >> $GITHUB_ENV
           echo "ALERT_TABLE_DATA=" >> $GITHUB_ENV
         fi
-
     - name: Archive analysis results
       if: ${{ env.ANALYSIS_SUCCESS == 'true' }}
       uses: actions/upload-artifact@v4
@@ -141,35 +137,81 @@ jobs:
         npm install -g vercel@latest
         npm install @vercel/blob
     
-    - name: Upload batch_rules.json to Vercel Blob
+    - name: Upload batch_rules.json and processed_data to Vercel Blob
       if: ${{ env.ANALYSIS_SUCCESS == 'true' }}
       working-directory: backend
       env:
         BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
       run: |
         cat > upload-blob.mjs << 'EOF'
-        import { put } from '@vercel/blob';
-        import { readFileSync, appendFileSync } from 'fs';
+        import { put, list, del } from '@vercel/blob';
+        import { readFileSync, readdirSync, appendFileSync } from 'fs';
+        import { join } from 'path';
         
-        const content = readFileSync('batch_rules.json', 'utf-8');
+        // Step 1: Clean up old processed_data files
+        console.log('🧹 Cleaning up old processed_data files...');
+        const oldFiles = await list({
+          prefix: 'data/processed_data/',
+          token: process.env.BLOB_READ_WRITE_TOKEN,
+        });
         
-        const blob = await put('data/batch_rules.json', content, {
+        let deletedCount = 0;
+        for (const file of oldFiles.blobs) {
+          await del(file.url, { token: process.env.BLOB_READ_WRITE_TOKEN });
+          deletedCount++;
+        }
+        console.log(`✓ Deleted ${deletedCount} old files\n`);
+        
+        // Step 2: Upload batch_rules.json
+        const batchRulesContent = readFileSync('batch_rules.json', 'utf-8');
+        const batchRulesBlob = await put('data/batch_rules.json', batchRulesContent, {
           access: 'public',
           token: process.env.BLOB_READ_WRITE_TOKEN,
           addRandomSuffix: false,
           allowOverwrite: true,
         });
         
-        console.log('✅ Uploaded to Vercel Blob');
-        console.log('URL:', blob.url);
-        console.log('Pathname:', blob.pathname);
+        console.log('✅ Uploaded batch_rules.json to Vercel Blob');
+        console.log('URL:', batchRulesBlob.url);
+        console.log('Pathname:', batchRulesBlob.pathname);
         
-        // Save URL to GitHub environment
-        appendFileSync(process.env.GITHUB_ENV, `BLOB_URL=${blob.url}\n`);
+        // Step 3: Upload all files from processed_data directory
+        const processedDataDir = 'processed_data';
+        const files = readdirSync(processedDataDir);
+        
+        console.log(`\n📁 Uploading ${files.length} files from processed_data/...`);
+        
+        let uploadedCount = 0;
+        const uploadedFiles = [];
+        
+        for (const file of files) {
+          if (file.endsWith('.json')) {
+            const filePath = join(processedDataDir, file);
+            const fileContent = readFileSync(filePath, 'utf-8');
+            
+            const blob = await put(`data/processed_data/${file}`, fileContent, {
+              access: 'public',
+              token: process.env.BLOB_READ_WRITE_TOKEN,
+              addRandomSuffix: false,
+            });
+            
+            uploadedCount++;
+            uploadedFiles.push(file);
+            console.log(`✓ Uploaded ${file}`);
+          }
+        }
+        
+        console.log(`\n✅ Successfully uploaded ${uploadedCount} ticker files to Vercel Blob`);
+        console.log('Files:', uploadedFiles.join(', '));
+        
+        // Save info to GitHub environment
+        appendFileSync(process.env.GITHUB_ENV, `BLOB_BATCH_RULES_URL=${batchRulesBlob.url}\n`);
+        appendFileSync(process.env.GITHUB_ENV, `BLOB_TICKER_COUNT=${uploadedCount}\n`);
+        appendFileSync(process.env.GITHUB_ENV, `BLOB_DELETED_COUNT=${deletedCount}\n`);
         EOF
         
         node upload-blob.mjs
-    
+        
     - name: Trigger Vercel Deployment
       if: ${{ env.ANALYSIS_SUCCESS == 'true' }}
       run: |
@@ -198,7 +240,6 @@ jobs:
               <th align="right">Alert Count</th>
               <th align="left">Securities</th>
             </tr>'
-
           while IFS='|' read -r alert_type count securities; do
             [ -z "$alert_type" ] && continue
             esc_type=$(printf '%s' "$alert_type" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
@@ -210,7 +251,6 @@ jobs:
               <td>${esc_secs}</td>
             </tr>"
           done <<< "$ALERT_TABLE_DATA"
-
           html_table="${html_table}</table>"
           formatted_output="$html_table"
         else
@@ -220,13 +260,11 @@ jobs:
             formatted_output="<p>Analysis failed or timed out - no data available.</p>"
           fi
         fi
-
         {
           echo "formatted_table<<EOF"
           echo "$formatted_output"
           echo "EOF"
         } >> "$GITHUB_OUTPUT"
-
     - name: Generate IST Timestamp
       if: failure()
       run: |
@@ -255,24 +293,18 @@ jobs:
                   <li><b>✓ Successful:</b> ${{ env.SUCCESS_COUNT || '0' }}</li>
                   <li><b>✗ Failed:</b> ${{ env.FAILED_COUNT || '0' }}</li>
                 </ul>
-
                 <h3>📊 Summary</h3>
                 <ul>
                   <li><b>Securities with alerts:</b> ${{ env.SECURITY_COUNT || '0' }}</li>
                   <li><b>Total alerts generated:</b> ${{ env.ALERT_COUNT || '0' }}</li>
                   <li><b>Status:</b> ${{ env.ANALYSIS_SUCCESS == 'true' && '✅ Completed Successfully' || '❌ Failed/Timeout' }}</li>
                 </ul>
-
                 <h3>🏢 Securities with Alerts</h3>
                 <p>${{ env.SECURITIES_WITH_ALERTS || 'None' }}</p>
-
                 <h3>📈 Alert Breakdown</h3>
                 ${{ steps.format-table.outputs.formatted_table }}
-
                 ${{ env.ANALYSIS_SUCCESS == 'true' && '<h3>🚀 Deployment Status</h3><p>✅ batch_rules.json has been pushed to Vercel Blob - Deployment triggered automatically</p>' || '' }}
-
                 ${{ env.ANALYSIS_SUCCESS != 'true' && '<h3>ℹ️ Troubleshooting (if failed)</h3><ul><li>NSE API timeout (90 second limit)</li><li>Network connectivity issues</li><li>NSE server problems</li><li>Market hours / trading session status</li></ul>' || '' }}
-
                 <h3>🔗 Additional Info</h3>
                 <ul>
                   <li><b>Run ID:</b> ${{ github.run_number }}</li>
