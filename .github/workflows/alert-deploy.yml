@@ -17,7 +17,7 @@ env:
 jobs:
   alert-deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 10  # Kill entire job after 10 minutes
+    timeout-minutes: 12  # Kill entire job after 10 minutes
 
     env:
       ANALYSIS_SUCCESS: "false"
@@ -48,7 +48,7 @@ jobs:
       run: cargo build --release
       
     - name: Run Rust NSE Batch Analysis
-      timeout-minutes: 6
+      timeout-minutes: 8
       working-directory: backend
       run: |
         export NSE_MODE=batch
