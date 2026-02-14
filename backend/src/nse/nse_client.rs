@@ -123,26 +123,96 @@ impl NSEClient {
                 .context("Request send failed")?;
 
             let status = res.status();
+            
+            // ============================================
+            // NEW: Log HTTP response details
+            // ============================================
+            if config::is_ci_environment() {
+                println!("\n{}", "=".repeat(80));
+                println!("{} HTTP Response Log", "🌐".to_string());
+                println!("{}", "=".repeat(80));
+                println!("{} URL: {}", "→", url);
+                println!("{} Status: {} {}", "→", status.as_u16(), status.canonical_reason().unwrap_or("Unknown"));
+                
+                // Log response headers
+                println!("\n{} Response Headers:", "📋");
+                for (name, value) in res.headers() {
+                    if let Ok(val_str) = value.to_str() {
+                        println!("  {}: {}", name, val_str);
+                    }
+                }
+                println!("{}", "=".repeat(80));
+            }
+            // ============================================
 
             // Handle different status codes
             if status.is_success() {
                 let text = res.text().await.context("Failed to read body")?;
 
+                // ============================================
+                // NEW: Log response body preview in CI
+                // ============================================
+                if config::is_ci_environment() {
+                    let preview: String = text.chars().take(500).collect();
+                    println!("\n{} Response Body Preview (first 500 chars):", "📄");
+                    println!("{}", preview);
+                    println!("\n{} Response Length: {} bytes", "📊", text.len());
+                    println!("{}", "=".repeat(80));
+                    println!();
+                }
+                // ============================================
+
                 // Validate JSON
                 let trimmed = text.trim();
                 if !trimmed.starts_with('{') && !trimmed.starts_with('[') {
                     let preview: String = text.chars().take(200).collect();
+                    
+                    // Enhanced error logging for non-JSON responses
+                    if config::is_ci_environment() {
+                        println!("{} Non-JSON response detected!", "❌");
+                        println!("{} Full response body:", "⚠️");
+                        println!("{}", text);
+                        println!("{}", "=".repeat(80));
+                    }
+                    
                     anyhow::bail!("Non-JSON response: {}", preview);
                 }
 
                 Ok(text)
             } else if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+                // ============================================
+                // NEW: Log error response body
+                // ============================================
+                let body = res.text().await.unwrap_or_default();
+                
+                if config::is_ci_environment() {
+                    println!("\n{} Error Response Body:", "❌");
+                    println!("{}", body);
+                    println!("{}", "=".repeat(80));
+                    println!();
+                }
+                // ============================================
+                
                 // Retry on server errors and rate limits
                 anyhow::bail!("Retryable error: {}", status)
             } else {
                 // Fail fast on client errors
                 let body = res.text().await.unwrap_or_default();
                 let preview: String = body.chars().take(200).collect();
+                
+                // ============================================
+                // NEW: Log full error response in CI
+                // ============================================
+                if config::is_ci_environment() {
+                    println!("\n{} Client Error Response:", "❌");
+                    println!("{} Status: {}", "→", status);
+                    println!("{} Full Body:", "→");
+                    println!("{}", body);
+                    println!("{}", "=".repeat(80));
+                    println!();
+                }
+                // ============================================
+                
                 anyhow::bail!("Client error {}: {}", status, preview)
             }
         })
