@@ -52,7 +52,7 @@ pub const WARMUP_DELAY_MS: u64 = 200;
 // -----------------------------------------------
 // RETRY CONFIG
 // -----------------------------------------------
-pub const RETRY_BASE_DELAY_MS: u64 = 200;
+pub const RETRY_BASE_DELAY_MS: u64 = 180;
 pub const RETRY_FACTOR: u64 = 3;
 pub const RETRY_MAX_DELAY_SECS: u64 = 5;
 pub const RETRY_MAX_ATTEMPTS: usize = 5;
