@@ -129,19 +129,19 @@ impl NSEClient {
             // ============================================
             if config::is_ci_environment() {
                 println!("\n{}", "=".repeat(80));
-                println!("{} HTTP Response Log", "🌐".to_string());
-                println!("{}", "=".repeat(80));
+                // println!("{} HTTP Response Log", "🌐".to_string());
+                // println!("{}", "=".repeat(80));
                 println!("{} URL: {}", "→", url);
                 println!("{} Status: {} {}", "→", status.as_u16(), status.canonical_reason().unwrap_or("Unknown"));
                 
                 // Log response headers
-                println!("\n{} Response Headers:", "📋");
-                for (name, value) in res.headers() {
-                    if let Ok(val_str) = value.to_str() {
-                        println!("  {}: {}", name, val_str);
-                    }
-                }
-                println!("{}", "=".repeat(80));
+                // println!("\n{} Response Headers:", "📋");
+                // for (name, value) in res.headers() {
+                //     if let Ok(val_str) = value.to_str() {
+                //         println!("  {}: {}", name, val_str);
+                //     }
+                // }
+                // println!("{}", "=".repeat(80));
             }
             // ============================================
 
@@ -152,14 +152,14 @@ impl NSEClient {
                 // ============================================
                 // NEW: Log response body preview in CI
                 // ============================================
-                if config::is_ci_environment() {
-                    let preview: String = text.chars().take(500).collect();
-                    println!("\n{} Response Body Preview (first 500 chars):", "📄");
-                    println!("{}", preview);
-                    println!("\n{} Response Length: {} bytes", "📊", text.len());
-                    println!("{}", "=".repeat(80));
-                    println!();
-                }
+                // if config::is_ci_environment() {
+                //     let preview: String = text.chars().take(500).collect();
+                //     println!("\n{} Response Body Preview (first 500 chars):", "📄");
+                //     println!("{}", preview);
+                //     println!("\n{} Response Length: {} bytes", "📊", text.len());
+                //     println!("{}", "=".repeat(80));
+                //     println!();
+                // }
                 // ============================================
 
                 // Validate JSON
