@@ -32,7 +32,7 @@ impl NSECommands {
         println!("{}", "Step 2: Processing all securities...".cyan());
         
         let max_concurrent = if config::is_ci_environment() {
-            println!("{} CI Mode: Using higher concurrency ({})", "ℹ".blue(), config::CI_MAX_CONCURRENT);
+            println!("{} CI Mode: Using concurrency ({})", "ℹ".blue(), config::CI_MAX_CONCURRENT);
             config::CI_MAX_CONCURRENT
         } else {
             println!("{} Max concurrent requests: {}", "ℹ".blue(), config::DEFAULT_MAX_CONCURRENT);
