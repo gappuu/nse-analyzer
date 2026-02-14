@@ -130,70 +130,76 @@ impl NSEClient {
 
         // TIMING: Track request duration
         let request_start = std::time::Instant::now();
-        let mut attempt_count = 0;
+        let attempt_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let attempt_counter = Arc::clone(&attempt_count);
 
-        let result = Retry::spawn(backoff, || async {
-            attempt_count += 1;
-            let fetch_start = std::time::Instant::now();
-            
-            let res = self.client
-                .get(url)
-                .header("Referer", config::HEADER_REFERER)
-                .header("X-Requested-With", config::HEADER_X_REQUESTED_WITH)
-                .send()
-                .await
-                .context("Request send failed")?;
-
-            let send_duration = fetch_start.elapsed();
-            let status = res.status();
-            
-            // TIMING: Log request timing in CI
-            if config::is_ci_environment() {
-                let url_path = url.split('?').next().unwrap_or(url)
-                    .trim_start_matches("https://www.nseindia.com");
+        let result = Retry::spawn(backoff, move || {
+            let attempt_counter = Arc::clone(&attempt_counter);
+            async move {
+                let current_attempt = attempt_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                let fetch_start = std::time::Instant::now();
                 
+                let res = self.client
+                    .get(url)
+                    .header("Referer", config::HEADER_REFERER)
+                    .header("X-Requested-With", config::HEADER_X_REQUESTED_WITH)
+                    .send()
+                    .await
+                    .context("Request send failed")?;
+
+                let send_duration = fetch_start.elapsed();
+                let status = res.status();
+                
+                // TIMING: Log request timing in CI
+                if config::is_ci_environment() {
+                    let url_path = url.split('?').next().unwrap_or(url)
+                        .trim_start_matches("https://www.nseindia.com");
+                    
+                    if status.is_success() {
+                        println!("⏱️  {} - {}ms (attempt {}) - Status: {}", 
+                            url_path, send_duration.as_millis(), current_attempt, status);
+                    } else {
+                        eprintln!("⚠️  {} - {}ms (attempt {}) - Status: {}", 
+                            url_path, send_duration.as_millis(), current_attempt, status);
+                    }
+                }
+
                 if status.is_success() {
-                    println!("⏱️  {} - {}ms (attempt {}) - Status: {}", 
-                        url_path, send_duration.as_millis(), attempt_count, status);
+                    let body_start = std::time::Instant::now();
+                    let text = res.text().await.context("Failed to read body")?;
+                    let body_duration = body_start.elapsed();
+
+                    // TIMING: Log body read time if significant
+                    if config::is_ci_environment() && body_duration.as_millis() > 100 {
+                        println!("   📥 Body read: {}ms (size: {} bytes)", 
+                            body_duration.as_millis(), text.len());
+                    }
+
+                    // Fast validation without verbose logging
+                    let trimmed = text.trim();
+                    if !trimmed.starts_with('{') && !trimmed.starts_with('[') {
+                        anyhow::bail!("Non-JSON response");
+                    }
+
+                    Ok(text)
+                } else if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+                    anyhow::bail!("Retryable error: {}", status)
                 } else {
-                    eprintln!("⚠️  {} - {}ms (attempt {}) - Status: {}", 
-                        url_path, send_duration.as_millis(), attempt_count, status);
+                    anyhow::bail!("Client error {}", status)
                 }
-            }
-
-            if status.is_success() {
-                let body_start = std::time::Instant::now();
-                let text = res.text().await.context("Failed to read body")?;
-                let body_duration = body_start.elapsed();
-
-                // TIMING: Log body read time if significant
-                if config::is_ci_environment() && body_duration.as_millis() > 100 {
-                    println!("   📥 Body read: {}ms (size: {} bytes)", 
-                        body_duration.as_millis(), text.len());
-                }
-
-                // Fast validation without verbose logging
-                let trimmed = text.trim();
-                if !trimmed.starts_with('{') && !trimmed.starts_with('[') {
-                    anyhow::bail!("Non-JSON response");
-                }
-
-                Ok(text)
-            } else if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
-                anyhow::bail!("Retryable error: {}", status)
-            } else {
-                anyhow::bail!("Client error {}", status)
             }
         })
         .await;
 
         // TIMING: Log total request time
         let total_duration = request_start.elapsed();
+        let final_attempt_count = attempt_count.load(std::sync::atomic::Ordering::Relaxed);
+        
         if config::is_ci_environment() && total_duration.as_millis() > 500 {
             let url_path = url.split('?').next().unwrap_or(url)
                 .trim_start_matches("https://www.nseindia.com");
             println!("🐌 SLOW REQUEST: {} - {}ms total (retries: {})", 
-                url_path, total_duration.as_millis(), attempt_count);
+                url_path, total_duration.as_millis(), final_attempt_count);
         }
 
         result
