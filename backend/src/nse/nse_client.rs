@@ -144,6 +144,12 @@ impl NSEClient {
                 eprintln!("⚠️  {} - Status: {}", url.split('?').next().unwrap_or(url), status);
             }
 
+            if config::is_ci_environment() {
+                println!("\n{}", "=".repeat(80));
+                println!("{} URL: {}", "→", url);
+                println!("{} Status: {} {}", "→", status.as_u16(), status.canonical_reason().unwrap_or("Unknown"));
+            }
+
             if status.is_success() {
                 let text = res.text().await.context("Failed to read body")?;
 

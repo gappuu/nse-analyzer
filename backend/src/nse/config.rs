@@ -61,7 +61,7 @@ pub const RETRY_MAX_ATTEMPTS: usize = 3; // Reduced from 5
 // -----------------------------------------------
 // GITHUB ACTIONS TIMEOUT CONFIG
 // -----------------------------------------------
-pub const GITHUB_ACTIONS_TIMEOUT_SECS: u64 = 240; // Increased from 220 for safety margin
+pub const GITHUB_ACTIONS_TIMEOUT_SECS: u64 = 540; //
 
 // -----------------------------------------------
 // AGGRESSIVE CONCURRENCY LIMITS
