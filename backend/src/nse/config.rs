@@ -42,10 +42,10 @@ pub const ACCEPT_LANGUAGES: &[&str] = &[
     "en-IN,en;q=0.9",
 ];
 
-// OPTIMIZATION: Reduced timeout for faster failure detection
-// CI mode uses even more aggressive timeout
-pub const HTTP_TIMEOUT: Duration = Duration::from_secs(15); // Default
-pub const CI_HTTP_TIMEOUT: Duration = Duration::from_secs(8); // CI mode - aggressive!
+// OPTIMIZATION: Balanced timeout - not too long, not too short
+// CI mode uses slightly more aggressive timeout but still reasonable
+pub const HTTP_TIMEOUT: Duration = Duration::from_secs(20); // Default - generous
+pub const CI_HTTP_TIMEOUT: Duration = Duration::from_secs(12); // CI mode - balanced
 
 // -----------------------------------------------
 // SESSION WARMUP
@@ -53,18 +53,18 @@ pub const CI_HTTP_TIMEOUT: Duration = Duration::from_secs(8); // CI mode - aggre
 pub const WARMUP_DELAY_MS: u64 = 200;
 
 // -----------------------------------------------
-// ULTRA-AGGRESSIVE RETRY CONFIG FOR CI
+// BALANCED RETRY CONFIG FOR CI
 // -----------------------------------------------
 pub const RETRY_BASE_DELAY_MS: u64 = 100;
 pub const RETRY_FACTOR: u64 = 2;
 pub const RETRY_MAX_DELAY_SECS: u64 = 3;
 pub const RETRY_MAX_ATTEMPTS: usize = 3;
 
-// CI-specific retry config (even more aggressive)
-pub const CI_RETRY_BASE_DELAY_MS: u64 = 50; // Reduced from 100ms
+// CI-specific retry config (balanced approach)
+pub const CI_RETRY_BASE_DELAY_MS: u64 = 180; // Reasonable delay
 pub const CI_RETRY_FACTOR: u64 = 2;
-pub const CI_RETRY_MAX_DELAY_SECS: u64 = 1; // Reduced from 3s
-pub const CI_RETRY_MAX_ATTEMPTS: usize = 2; // Reduced from 3 (fail faster!)
+pub const CI_RETRY_MAX_DELAY_SECS: u64 = 2; 
+pub const CI_RETRY_MAX_ATTEMPTS: usize = 3; // Give NSE more chances
 
 // -----------------------------------------------
 // GITHUB ACTIONS TIMEOUT CONFIG
@@ -72,10 +72,10 @@ pub const CI_RETRY_MAX_ATTEMPTS: usize = 2; // Reduced from 3 (fail faster!)
 pub const GITHUB_ACTIONS_TIMEOUT_SECS: u64 = 750; // Increased safety margin
 
 // -----------------------------------------------
-// ULTRA-AGGRESSIVE CONCURRENCY FOR CI
+// BALANCED CONCURRENCY FOR CI
 // -----------------------------------------------
 pub const DEFAULT_MAX_CONCURRENT: usize = 10;
-pub const CI_MAX_CONCURRENT: usize = 25; // NUCLEAR option - max parallelism!
+pub const CI_MAX_CONCURRENT: usize = 15; // Balanced - not too aggressive to avoid overwhelming NSE
 
 // -----------------------------------------------
 // HTTP HEADERS
