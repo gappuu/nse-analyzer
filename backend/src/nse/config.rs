@@ -43,7 +43,9 @@ pub const ACCEPT_LANGUAGES: &[&str] = &[
 ];
 
 // OPTIMIZATION: Reduced timeout for faster failure detection
-pub const HTTP_TIMEOUT: Duration = Duration::from_secs(15); // Reduced from 20s
+// CI mode uses even more aggressive timeout
+pub const HTTP_TIMEOUT: Duration = Duration::from_secs(15); // Default
+pub const CI_HTTP_TIMEOUT: Duration = Duration::from_secs(8); // CI mode - aggressive!
 
 // -----------------------------------------------
 // SESSION WARMUP
@@ -51,23 +53,29 @@ pub const HTTP_TIMEOUT: Duration = Duration::from_secs(15); // Reduced from 20s
 pub const WARMUP_DELAY_MS: u64 = 200;
 
 // -----------------------------------------------
-// OPTIMIZED RETRY CONFIG
+// ULTRA-AGGRESSIVE RETRY CONFIG FOR CI
 // -----------------------------------------------
-pub const RETRY_BASE_DELAY_MS: u64 = 100; // Reduced from 200ms
-pub const RETRY_FACTOR: u64 = 2; // Reduced from 3 for faster retries
-pub const RETRY_MAX_DELAY_SECS: u64 = 3; // Reduced from 5s
-pub const RETRY_MAX_ATTEMPTS: usize = 3; // Reduced from 5
+pub const RETRY_BASE_DELAY_MS: u64 = 100;
+pub const RETRY_FACTOR: u64 = 2;
+pub const RETRY_MAX_DELAY_SECS: u64 = 3;
+pub const RETRY_MAX_ATTEMPTS: usize = 3;
+
+// CI-specific retry config (even more aggressive)
+pub const CI_RETRY_BASE_DELAY_MS: u64 = 50; // Reduced from 100ms
+pub const CI_RETRY_FACTOR: u64 = 2;
+pub const CI_RETRY_MAX_DELAY_SECS: u64 = 1; // Reduced from 3s
+pub const CI_RETRY_MAX_ATTEMPTS: usize = 2; // Reduced from 3 (fail faster!)
 
 // -----------------------------------------------
 // GITHUB ACTIONS TIMEOUT CONFIG
 // -----------------------------------------------
-pub const GITHUB_ACTIONS_TIMEOUT_SECS: u64 = 750; //
+pub const GITHUB_ACTIONS_TIMEOUT_SECS: u64 = 750; // Increased safety margin
 
 // -----------------------------------------------
-// AGGRESSIVE CONCURRENCY LIMITS
+// ULTRA-AGGRESSIVE CONCURRENCY FOR CI
 // -----------------------------------------------
-pub const DEFAULT_MAX_CONCURRENT: usize = 10; // Increased from 5
-pub const CI_MAX_CONCURRENT: usize = 15; // Increased from 5 (AGGRESSIVE!)
+pub const DEFAULT_MAX_CONCURRENT: usize = 10;
+pub const CI_MAX_CONCURRENT: usize = 25; // NUCLEAR option - max parallelism!
 
 // -----------------------------------------------
 // HTTP HEADERS

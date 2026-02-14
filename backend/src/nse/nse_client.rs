@@ -116,16 +116,24 @@ impl NSEClient {
     async fn fetch_json(&self, url: &str) -> Result<String> {
         self.warmup_if_needed().await?;
 
-        // OPTIMIZATION: Aggressive retry settings for CI
-        let (max_attempts, base_delay) = if config::is_ci_environment() {
-            (3, 100) // Reduced from 5 attempts, 200ms
+        // OPTIMIZATION: Ultra-aggressive retry settings for CI
+        let (max_attempts, base_delay, max_delay) = if config::is_ci_environment() {
+            (
+                config::CI_RETRY_MAX_ATTEMPTS,
+                config::CI_RETRY_BASE_DELAY_MS,
+                config::CI_RETRY_MAX_DELAY_SECS
+            )
         } else {
-            (config::RETRY_MAX_ATTEMPTS, config::RETRY_BASE_DELAY_MS)
+            (
+                config::RETRY_MAX_ATTEMPTS,
+                config::RETRY_BASE_DELAY_MS,
+                config::RETRY_MAX_DELAY_SECS
+            )
         };
 
         let backoff = ExponentialBackoff::from_millis(base_delay)
             .factor(config::RETRY_FACTOR)
-            .max_delay(Duration::from_secs(config::RETRY_MAX_DELAY_SECS))
+            .max_delay(Duration::from_secs(max_delay))
             .take(max_attempts);
 
         // TIMING: Track request duration
@@ -198,7 +206,7 @@ impl NSEClient {
         if config::is_ci_environment() && total_duration.as_millis() > 500 {
             let url_path = url.split('?').next().unwrap_or(url)
                 .trim_start_matches("https://www.nseindia.com");
-            println!("🐌 SLOW REQUEST: {} - {}ms total (retries: {})", 
+            println!("🐌 SLOW REQUEST: {} - {}ms total (attempts: {})", 
                 url_path, total_duration.as_millis(), final_attempt_count);
         }
 
@@ -495,12 +503,19 @@ fn build_client() -> Result<Client> {
     );
     headers.insert(header::ACCEPT, header::HeaderValue::from_static("*/*"));
 
+    // OPTIMIZATION: Use aggressive timeout in CI
+    let timeout = if config::is_ci_environment() {
+        config::CI_HTTP_TIMEOUT
+    } else {
+        config::HTTP_TIMEOUT
+    };
+
     // OPTIMIZATION: Aggressive connection pooling for HTTP/1.1
     Ok(Client::builder()
         .default_headers(headers)
         .cookie_store(true)
         .user_agent(config::USER_AGENT)
-        .timeout(config::HTTP_TIMEOUT)
+        .timeout(timeout) // Dynamic timeout based on environment
         .pool_max_idle_per_host(20) // OPTIMIZATION: Connection pooling
         .pool_idle_timeout(Duration::from_secs(90)) // OPTIMIZATION: Keep connections alive
         .tcp_nodelay(true) // OPTIMIZATION: Disable Nagle's algorithm
