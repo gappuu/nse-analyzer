@@ -11,72 +11,72 @@ use tokio_retry::strategy::ExponentialBackoff;
 use tokio_retry::Retry;
 use chrono::{NaiveDate, NaiveTime, Local};
 
-
 // -----------------------------------------------
-// CLIENT WRAPPER WITH SESSION STATE
+// CLIENT WRAPPER WITH SESSION STATE AND EXPIRY CACHE
 // -----------------------------------------------
 pub struct NSEClient {
     client: Client,
     warmed_up: Arc<RwLock<bool>>,
+    cached_equity_expiry: Arc<RwLock<Option<String>>>, // NEW: Cache for equity expiry
 }
 
 fn select_expiry<'a>(expiry_dates: &'a [String]) -> Result<&'a String> {
-        if expiry_dates.is_empty() {
-            return Err(anyhow!("No expiry dates found"));
-        }
-
-        // 1) Parse all dates and keep their original indices
-        let mut parsed: Vec<(NaiveDate, usize)> = Vec::new();
-
-        for (idx, s) in expiry_dates.iter().enumerate() {
-            let d = NaiveDate::parse_from_str(s, "%d-%b-%Y")
-                .with_context(|| format!("Failed to parse expiry date: {}", s))?;
-            parsed.push((d, idx));
-        }
-
-        // 2) Sort by date (earliest first)
-        parsed.sort_by_key(|(d, _)| *d);
-
-        // 3) Get today's date and current time
-        let now = Local::now();
-        let today = now.date_naive();
-        let current_time = now.time();
-        let cutoff = NaiveTime::from_hms_opt(15, 30, 0).unwrap(); // 15:30
-
-        // 4) Apply your rules while scanning sorted expiries
-        for (date, idx) in parsed {
-            if date < today {
-                // Rule 3: past date → skip, try next
-                continue;
-            }
-
-            if date == today {
-                // Rule 1 & 4: today's expiry
-                if current_time < cutoff {
-                    // Before 15:30 → use today
-                    return Ok(&expiry_dates[idx]);
-                } else {
-                    // After 15:30 → skip today, try next
-                    continue;
-                }
-            }
-
-            // Rule 2: future date (> today) → use it
-            if date > today {
-                return Ok(&expiry_dates[idx]);
-            }
-        }
-
-        // If we reach here, all expiries were invalid (past or today after cutoff)
-        Err(anyhow!("No valid expiry found (all past or after cutoff)"))
+    if expiry_dates.is_empty() {
+        return Err(anyhow!("No expiry dates found"));
     }
 
+    // 1) Parse all dates and keep their original indices
+    let mut parsed: Vec<(NaiveDate, usize)> = Vec::new();
+
+    for (idx, s) in expiry_dates.iter().enumerate() {
+        let d = NaiveDate::parse_from_str(s, "%d-%b-%Y")
+            .with_context(|| format!("Failed to parse expiry date: {}", s))?;
+        parsed.push((d, idx));
+    }
+
+    // 2) Sort by date (earliest first)
+    parsed.sort_by_key(|(d, _)| *d);
+
+    // 3) Get today's date and current time
+    let now = Local::now();
+    let today = now.date_naive();
+    let current_time = now.time();
+    let cutoff = NaiveTime::from_hms_opt(15, 30, 0).unwrap(); // 15:30
+
+    // 4) Apply your rules while scanning sorted expiries
+    for (date, idx) in parsed {
+        if date < today {
+            // Rule 3: past date → skip, try next
+            continue;
+        }
+
+        if date == today {
+            // Rule 1 & 4: today's expiry
+            if current_time < cutoff {
+                // Before 15:30 → use today
+                return Ok(&expiry_dates[idx]);
+            } else {
+                // After 15:30 → skip today, try next
+                continue;
+            }
+        }
+
+        // Rule 2: future date (> today) → use it
+        if date > today {
+            return Ok(&expiry_dates[idx]);
+        }
+    }
+
+    // If we reach here, all expiries were invalid (past or today after cutoff)
+    Err(anyhow!("No valid expiry found (all past or after cutoff)"))
+}
 
 impl NSEClient {
     pub fn new() -> Result<Self> {
         Ok(Self {
             client: build_client()?,
             warmed_up: Arc::new(RwLock::new(false)),
+            cached_equity_expiry: Arc::new(RwLock::new(None)), // NEW: Initialize cache
         })
     }
 
@@ -125,7 +125,7 @@ impl NSEClient {
             let status = res.status();
             
             // ============================================
-            // NEW: Log HTTP response details
+            // HTTP Response Logging
             // ============================================
             if config::is_ci_environment() {
                 println!("\n{}", "=".repeat(80));
@@ -143,7 +143,6 @@ impl NSEClient {
                 // }
                 // println!("{}", "=".repeat(80));
             }
-            // ============================================
 
             // Handle different status codes
             if status.is_success() {
@@ -167,7 +166,6 @@ impl NSEClient {
                 if !trimmed.starts_with('{') && !trimmed.starts_with('[') {
                     let preview: String = text.chars().take(200).collect();
                     
-                    // Enhanced error logging for non-JSON responses
                     if config::is_ci_environment() {
                         println!("{} Non-JSON response detected!", "❌");
                         println!("{} Full response body:", "⚠️");
@@ -180,9 +178,6 @@ impl NSEClient {
 
                 Ok(text)
             } else if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
-                // ============================================
-                // NEW: Log error response body
-                // ============================================
                 let body = res.text().await.unwrap_or_default();
                 
                 if config::is_ci_environment() {
@@ -191,18 +186,12 @@ impl NSEClient {
                     println!("{}", "=".repeat(80));
                     println!();
                 }
-                // ============================================
                 
-                // Retry on server errors and rate limits
                 anyhow::bail!("Retryable error: {}", status)
             } else {
-                // Fail fast on client errors
                 let body = res.text().await.unwrap_or_default();
                 let preview: String = body.chars().take(200).collect();
                 
-                // ============================================
-                // NEW: Log full error response in CI
-                // ============================================
                 if config::is_ci_environment() {
                     println!("\n{} Client Error Response:", "❌");
                     println!("{} Status: {}", "→", status);
@@ -211,7 +200,6 @@ impl NSEClient {
                     println!("{}", "=".repeat(80));
                     println!();
                 }
-                // ============================================
                 
                 anyhow::bail!("Client error {}: {}", status, preview)
             }
@@ -219,7 +207,6 @@ impl NSEClient {
         .await
     }
 
-    
     // -----------------------------------------------
     // STEP 1: FETCH FNO LIST
     // -----------------------------------------------
@@ -255,6 +242,55 @@ impl NSEClient {
     }
 
     // -----------------------------------------------
+    // NEW: FETCH CONTRACT INFO WITH CACHING FOR EQUITIES
+    // -----------------------------------------------
+    async fn fetch_contract_info_with_cache(&self, security: &Security) -> Result<String> {
+        match security.security_type {
+            SecurityType::Indices => {
+                // Indices always fetch fresh contract info (different expiry schedules)
+                if config::is_ci_environment() {
+                    println!("{} {} (Index): Fetching fresh contract info", "🔍".to_string(), security.symbol);
+                }
+                let contract_info = self.fetch_contract_info(&security.symbol).await?;
+                let expiry = select_expiry(&contract_info.expiry_dates)?;
+                Ok(expiry.clone())
+            }
+            SecurityType::Equity => {
+                // Check if we have cached equity expiry
+                let cached = self.cached_equity_expiry.read().await;
+                
+                if let Some(expiry) = cached.as_ref() {
+                    // Use cached expiry (saves 1 API call per equity!)
+                    if config::is_ci_environment() {
+                        println!("{} {} (Equity): Using cached expiry: {}", "⚡".to_string(), security.symbol, expiry);
+                    }
+                    Ok(expiry.clone())
+                } else {
+                    // First equity - fetch and cache
+                    drop(cached); // Release read lock
+                    
+                    if config::is_ci_environment() {
+                        println!("{} {} (First Equity): Fetching and caching expiry", "🔍".to_string(), security.symbol);
+                    }
+                    
+                    let contract_info = self.fetch_contract_info(&security.symbol).await?;
+                    let expiry = select_expiry(&contract_info.expiry_dates)?;
+                    
+                    // Cache the expiry for future equities
+                    let mut cache = self.cached_equity_expiry.write().await;
+                    *cache = Some(expiry.clone());
+                    
+                    if config::is_ci_environment() {
+                        println!("{} Cached equity expiry: {} (will be reused for all equities)", "✓".to_string(), expiry);
+                    }
+                    
+                    Ok(expiry.clone())
+                }
+            }
+        }
+    }
+
+    // -----------------------------------------------
     // STEP 3: FETCH OPTION CHAIN
     // -----------------------------------------------
     pub async fn fetch_option_chain(
@@ -276,7 +312,7 @@ impl NSEClient {
     }
 
     // -----------------------------------------------
-    // NEW API A: FETCH FUTURES DATA
+    // API A: FETCH FUTURES DATA
     // -----------------------------------------------
     pub async fn fetch_futures_data(
         &self,
@@ -298,27 +334,26 @@ impl NSEClient {
     }
 
     // -----------------------------------------------
-    // NEW API B: FETCH DERIVATIVES HISTORICAL DATA
+    // API B: FETCH DERIVATIVES HISTORICAL DATA
     // -----------------------------------------------
     pub async fn fetch_derivatives_historical_data(
         &self,
         symbol: &str,
         security_type: &SecurityType,
-        instrument_type: &str, // "OPTSTK", "FUTSTK", "OPTIDX", "FUTIDX"
+        instrument_type: &str,
         year: Option<&str>,
         expiry: &str,
         strike_price: Option<&str>,
-        option_type: Option<&str>, // "CE" or "PE"
+        option_type: Option<&str>,
         from_date: &str,
         to_date: &str,
     ) -> Result<Value> {
-        // Determine instrument type based on security type and instrument
         let instype = match (security_type, instrument_type) {
             (SecurityType::Equity, "OPTIONS") => "OPTSTK",
             (SecurityType::Equity, "FUTURES") => "FUTSTK", 
             (SecurityType::Indices, "OPTIONS") => "OPTIDX",
             (SecurityType::Indices, "FUTURES") => "FUTIDX",
-            _ => instrument_type, // Use as provided if it's already in correct format
+            _ => instrument_type,
         };
 
         let mut url = format!(
@@ -331,7 +366,6 @@ impl NSEClient {
             urlencoding::encode(to_date)
         );
 
-        // Add optional parameters
         if let Some(year_val) = year {
             if !year_val.is_empty() {
                 url.push_str(&format!("&year={}", urlencoding::encode(year_val)));
@@ -358,7 +392,7 @@ impl NSEClient {
     }
 
     // -----------------------------------------------
-    // BATCH FETCH WITH CONCURRENCY CONTROL
+    // OPTIMIZED BATCH FETCH WITH EXPIRY CACHING
     // -----------------------------------------------
     pub async fn fetch_all_option_chains(
         self: Arc<Self>,
@@ -373,23 +407,14 @@ impl NSEClient {
             let sem = Arc::clone(&semaphore);
 
             let handle = tokio::spawn(async move {
-                // Acquire permit - handle error properly
                 let _permit = sem.acquire_owned().await
                     .map_err(|e| anyhow::anyhow!("Semaphore error: {}", e))?;
 
-                // Get contract info
-                let contract_info = client.fetch_contract_info(&security.symbol).await?;
-                
-                // // Use nearest (first) expiry
-                // let expiry = contract_info
-                //     .expiry_dates
-                //     .first()
-                //     .context("No expiry dates found")?;
-
-                let expiry = select_expiry(&contract_info.expiry_dates)?;
+                // NEW: Use cached expiry for equities, fresh fetch for indices
+                let expiry = client.fetch_contract_info_with_cache(&security).await?;
 
                 // Get option chain
-                let chain = client.fetch_option_chain(&security, expiry).await?;
+                let chain = client.fetch_option_chain(&security, &expiry).await?;
 
                 Ok((security, chain))
             });
@@ -415,7 +440,6 @@ impl NSEClient {
 fn build_client() -> Result<Client> {
     let mut headers = header::HeaderMap::new();
     
-    // Rotating Accept-Language headers (fingerprint avoidance)
     let lang = config::ACCEPT_LANGUAGES.choose(&mut thread_rng()).unwrap();
     headers.insert(
         header::ACCEPT_LANGUAGE, 
@@ -425,7 +449,7 @@ fn build_client() -> Result<Client> {
 
     Ok(Client::builder()
         .default_headers(headers)
-        .cookie_store(true) // crucial for NSE
+        .cookie_store(true)
         .user_agent(config::USER_AGENT)
         .timeout(config::HTTP_TIMEOUT)
         .build()
