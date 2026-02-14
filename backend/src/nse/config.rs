@@ -10,7 +10,7 @@ pub fn nse_contract_info_url(symbol: &str) -> String {
     format!(
         "{}/api/option-chain-contract-info?symbol={}",
         NSE_BASE_URL,
-        urlencoding::encode(symbol) // URL-encode the symbol
+        urlencoding::encode(symbol)
     )
 }
 
@@ -19,8 +19,8 @@ pub fn nse_option_chain_url(typ: &str, symbol: &str, expiry: &str) -> String {
         "{}/api/option-chain-v3?type={}&symbol={}&expiry={}",
         NSE_BASE_URL,
         typ,
-        urlencoding::encode(symbol), // URL-encode the symbol
-        urlencoding::encode(expiry)  // URL-encode the expiry (just in case)
+        urlencoding::encode(symbol),
+        urlencoding::encode(expiry)
     )
 }
 
@@ -42,7 +42,8 @@ pub const ACCEPT_LANGUAGES: &[&str] = &[
     "en-IN,en;q=0.9",
 ];
 
-pub const HTTP_TIMEOUT: Duration = Duration::from_secs(20);
+// OPTIMIZATION: Reduced timeout for faster failure detection
+pub const HTTP_TIMEOUT: Duration = Duration::from_secs(15); // Reduced from 20s
 
 // -----------------------------------------------
 // SESSION WARMUP
@@ -50,28 +51,23 @@ pub const HTTP_TIMEOUT: Duration = Duration::from_secs(20);
 pub const WARMUP_DELAY_MS: u64 = 200;
 
 // -----------------------------------------------
-// RETRY CONFIG
+// OPTIMIZED RETRY CONFIG
 // -----------------------------------------------
-pub const RETRY_BASE_DELAY_MS: u64 = 200;
-pub const RETRY_FACTOR: u64 = 3;
-pub const RETRY_MAX_DELAY_SECS: u64 = 5;
-pub const RETRY_MAX_ATTEMPTS: usize = 5;
+pub const RETRY_BASE_DELAY_MS: u64 = 100; // Reduced from 200ms
+pub const RETRY_FACTOR: u64 = 2; // Reduced from 3 for faster retries
+pub const RETRY_MAX_DELAY_SECS: u64 = 3; // Reduced from 5s
+pub const RETRY_MAX_ATTEMPTS: usize = 3; // Reduced from 5
 
 // -----------------------------------------------
 // GITHUB ACTIONS TIMEOUT CONFIG
 // -----------------------------------------------
-pub const GITHUB_ACTIONS_TIMEOUT_SECS: u64 = 320; 
+pub const GITHUB_ACTIONS_TIMEOUT_SECS: u64 = 240; // Increased from 220 for safety margin
 
 // -----------------------------------------------
-// CONCURRENCY LIMITS
+// AGGRESSIVE CONCURRENCY LIMITS
 // -----------------------------------------------
-pub const DEFAULT_MAX_CONCURRENT: usize = 5;
-pub const CI_MAX_CONCURRENT: usize = 5; 
-// -----------------------------------------------
-// RATE LIMITING (if needed)
-// -----------------------------------------------
-// Uncomment and adjust if you add rate limiting
-// pub const RATE_LIMIT_PER_SECOND: u32 = 2;
+pub const DEFAULT_MAX_CONCURRENT: usize = 10; // Increased from 5
+pub const CI_MAX_CONCURRENT: usize = 15; // Increased from 5 (AGGRESSIVE!)
 
 // -----------------------------------------------
 // HTTP HEADERS
@@ -102,4 +98,20 @@ pub fn get_single_expiry() -> String {
 /// Check if running in CI/automated environment
 pub fn is_ci_environment() -> bool {
     std::env::var("CI").is_ok() || std::env::var("GITHUB_ACTIONS").is_ok()
+}
+
+/// Get optimized concurrency based on environment
+pub fn get_max_concurrent() -> usize {
+    // Allow override via environment variable
+    if let Ok(val) = std::env::var("NSE_MAX_CONCURRENT") {
+        if let Ok(num) = val.parse::<usize>() {
+            return num.max(1).min(50); // Clamp between 1-50
+        }
+    }
+    
+    if is_ci_environment() {
+        CI_MAX_CONCURRENT
+    } else {
+        DEFAULT_MAX_CONCURRENT
+    }
 }

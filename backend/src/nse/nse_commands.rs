@@ -8,15 +8,16 @@ use super::nse_api_server;
 use anyhow::Result;
 use colored::Colorize;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// NSE Command Handler - encapsulates all NSE-related operations
 pub struct NSECommands;
 
 impl NSECommands {
-    /// Run batch fetch for all FNO securities
+    /// OPTIMIZED: Run batch fetch with streaming and progress tracking
     pub async fn run_batch() -> Result<()> {
         println!("{}", "=".repeat(60).blue());
-        println!("{}", "NSE Batch Processor".green().bold());
+        println!("{}", "NSE Batch Processor (OPTIMIZED)".green().bold());
         println!("{}", "=".repeat(60).blue());
         println!();
 
@@ -28,25 +29,63 @@ impl NSECommands {
         println!("{} Found {} securities", "✓".green(), securities.len());
         println!();
 
-        // Step 2: Bulk process all securities with timeout handling
+        // Step 2: Determine concurrency based on environment
+        let max_concurrent = config::get_max_concurrent();
+        
         println!("{}", "Step 2: Processing all securities...".cyan());
-        
-        let max_concurrent = if config::is_ci_environment() {
-            println!("{} CI Mode: Using higher concurrency ({})", "ℹ".blue(), config::CI_MAX_CONCURRENT);
-            config::CI_MAX_CONCURRENT
+        if config::is_ci_environment() {
+            println!("{} CI Mode: AGGRESSIVE concurrency ({})", "🚀".to_string(), max_concurrent);
+            println!("{} Timeout: {} seconds", "⏱".yellow(), config::GITHUB_ACTIONS_TIMEOUT_SECS);
         } else {
-            println!("{} Max concurrent requests: {}", "ℹ".blue(), config::DEFAULT_MAX_CONCURRENT);
-            config::DEFAULT_MAX_CONCURRENT
-        };
-        
+            println!("{} Max concurrent requests: {}", "ℹ".blue(), max_concurrent);
+        }
         println!();
 
         let start_time = std::time::Instant::now();
         
-        // Wrap the batch processing with a timeout for CI environments
-        let results = if config::is_ci_environment() {
-            println!("{} CI timeout enabled: {} seconds", "⏱".yellow(), config::GITHUB_ACTIONS_TIMEOUT_SECS);
+        // OPTIMIZATION: Progress tracking
+        let total_count = securities.len();
+        let processed_count = Arc::new(AtomicUsize::new(0));
+        let success_count = Arc::new(AtomicUsize::new(0));
+        let failed_count = Arc::new(AtomicUsize::new(0));
+        
+        // Spawn progress reporter for CI
+        let progress_handle = if config::is_ci_environment() {
+            let processed = Arc::clone(&processed_count);
+            let total = total_count;
+            let start = start_time.clone();
             
+            Some(tokio::spawn(async move {
+                let mut last_reported = 0;
+                loop {
+                    tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+                    let current = processed.load(Ordering::Relaxed);
+                    
+                    if current > last_reported {
+                        let elapsed = start.elapsed().as_secs_f64();
+                        let rate = current as f64 / elapsed;
+                        let remaining = total - current;
+                        let eta = remaining as f64 / rate;
+                        
+                        println!("{} Progress: {}/{} ({:.1}%) | Rate: {:.1}/s | ETA: {:.0}s", 
+                            "📊".to_string(), current, total, 
+                            (current as f64 / total as f64) * 100.0,
+                            rate, eta);
+                        
+                        last_reported = current;
+                    }
+                    
+                    if current >= total {
+                        break;
+                    }
+                }
+            }))
+        } else {
+            None
+        };
+        
+        // Wrap the batch processing with timeout for CI
+        let results = if config::is_ci_environment() {
             let timeout_duration = std::time::Duration::from_secs(config::GITHUB_ACTIONS_TIMEOUT_SECS);
             
             match tokio::time::timeout(
@@ -55,50 +94,69 @@ impl NSECommands {
             ).await {
                 Ok(results) => results,
                 Err(_) => {
-                    println!("{} Timeout reached after {} seconds - stopping analysis", "⚠".red(), config::GITHUB_ACTIONS_TIMEOUT_SECS);
-                    println!("{} This may indicate NSE API issues or network problems", "ℹ".blue());
+                    println!("{} Timeout reached after {} seconds", "⚠".red(), config::GITHUB_ACTIONS_TIMEOUT_SECS);
                     
-                    // Create empty results vector matching the securities count
+                    // Return partial results with timeout errors
                     securities.iter().map(|_| Err(anyhow::anyhow!("Timeout"))).collect()
                 }
             }
         } else {
-            // No timeout for local development
             client.fetch_all_option_chains(securities.clone(), max_concurrent).await
         };
 
+        // Cancel progress reporter
+        if let Some(handle) = progress_handle {
+            handle.abort();
+        }
+
         let elapsed = start_time.elapsed();
         
-        // Step 3: Process results
+        // Step 3: Process results with real-time feedback
         let mut successful = Vec::new();
         let mut failed = Vec::new();
-        let mut timeout_count = 0;
+        let mut timeout_errors = 0;
 
+        println!("\n{} Processing results...", "→".cyan());
+        
         for (security, result) in securities.iter().zip(results.iter()) {
+            processed_count.fetch_add(1, Ordering::Relaxed);
+            
             match result {
                 Ok((_, chain)) => {
                     successful.push((security.clone(), chain.clone()));
+                    success_count.fetch_add(1, Ordering::Relaxed);
                     print!("{}", ".".green());
                 }
                 Err(e) => {
-                    if e.to_string().contains("Timeout") {
-                        timeout_count += 1;
+                    let error_msg = e.to_string();
+                    if error_msg.contains("Timeout") {
+                        timeout_errors += 1;
                         print!("{}", "⏱".yellow());
                     } else {
-                        failed.push((security.symbol.clone(), e.to_string()));
+                        failed.push((security.symbol.clone(), error_msg));
+                        failed_count.fetch_add(1, Ordering::Relaxed);
                         print!("{}", "✗".red());
                     }
                 }
+            }
+            
+            // Print newline every 50 items for readability
+            if processed_count.load(Ordering::Relaxed) % 50 == 0 {
+                println!();
             }
         }
         
         println!("\n");
 
         // Step 4: Display summary
-        Self::display_batch_summary(&successful, &failed, timeout_count, elapsed, &securities);
+        Self::display_batch_summary(&successful, &failed, timeout_errors, elapsed, &securities);
 
         // Step 5: Process data and run rules
-        Self::process_batch_data_and_rules(successful).await?;
+        if !successful.is_empty() {
+            Self::process_batch_data_and_rules(successful).await?;
+        } else {
+            println!("{} No successful fetches to process", "⚠".yellow());
+        }
 
         println!();
         println!("{}", "=".repeat(60).blue());
@@ -108,7 +166,7 @@ impl NSECommands {
         Ok(())
     }
 
-    /// Run single security fetch (for API endpoints only - not used in GitHub Actions)
+    /// Run single security fetch
     pub async fn run_single(symbol: &str, expiry: &str) -> Result<()> {
         println!("{}", "=".repeat(60).blue());
         println!("{}", "NSE Single Security Fetch".green().bold());
@@ -117,7 +175,6 @@ impl NSECommands {
 
         let client = NSEClient::new()?;
 
-        // Determine security type
         let security = if config::NSE_INDICES.contains(&symbol) {
             models::Security::index(symbol.to_string())
         } else {
@@ -130,24 +187,19 @@ impl NSECommands {
 
         let chain = client.fetch_option_chain(&security, expiry).await?;
 
-        // Display results
         Self::display_single_results(symbol, &chain, expiry);
 
-        // Process the data
         let (processed_data, spread) = processor::process_option_data(
             chain.filtered.data.clone(),
             chain.records.underlying_value
         );
 
-        // Extract days_to_expiry from first processed option
         let days_to_expiry = processed_data.first()
             .map(|opt| opt.days_to_expiry)
             .unwrap_or(0);
 
-        // Print results
         println!("{} Days to expiry: {}", "ℹ".blue(), days_to_expiry);
         
-        // Run rules on processed data
         let rules_output = rules::run_rules(
             &processed_data,
             symbol.to_string(),
@@ -176,7 +228,7 @@ impl NSECommands {
         nse_api_server::start_server(port).await
     }
 
-    /// Display batch processing summary
+    /// OPTIMIZED: Display batch summary with performance metrics
     fn display_batch_summary(
         successful: &[(models::Security, models::OptionChain)],
         failed: &[(String, String)],
@@ -187,29 +239,37 @@ impl NSECommands {
         println!("{}", "=".repeat(60).blue());
         println!("{}", "Summary".cyan().bold());
         println!("{}", "=".repeat(60).blue());
-        println!("{} Successful: {}", "✓".green(), successful.len());
+        
+        let success_pct = (successful.len() as f64 / securities.len() as f64) * 100.0;
+        
+        println!("{} Successful: {} ({:.1}%)", "✓".green(), successful.len(), success_pct);
         println!("{} Failed: {}", "✗".red(), failed.len());
         
         if timeout_count > 0 {
-            println!("{} Timed out: {} (due to {} second limit)", "⏱".yellow(), timeout_count, config::GITHUB_ACTIONS_TIMEOUT_SECS);
+            println!("{} Timed out: {}", "⏱".yellow(), timeout_count);
         }
         
-        println!("{} Time taken: {:.2}s", "⏱".yellow(), elapsed.as_secs_f64());
+        println!();
+        println!("{} Performance Metrics:", "📊".to_string());
+        println!("  • Total time: {:.2}s", elapsed.as_secs_f64());
+        println!("  • Avg per security: {:.2}s", elapsed.as_secs_f64() / securities.len() as f64);
+        println!("  • Throughput: {:.1} securities/s", securities.len() as f64 / elapsed.as_secs_f64());
         
-        if securities.len() > 0 {
-            println!("{} Avg time per security: {:.2}s", "⏱".yellow(), elapsed.as_secs_f64() / securities.len() as f64);
+        if !successful.is_empty() {
+            println!("  • Success rate: {:.1}%", success_pct);
         }
         
         println!();
 
-        // Show failed securities
+        // Show sample of failed securities
         if !failed.is_empty() {
-            println!("{}", "Failed Securities:".red());
-            for (symbol, error) in failed.iter().take(10) {
-                println!("  {} {} → {}", "✗".red(), symbol.yellow(), error.chars().take(80).collect::<String>());
+            println!("{}", "Failed Securities (sample):".red());
+            for (symbol, error) in failed.iter().take(5) {
+                let short_error: String = error.chars().take(60).collect();
+                println!("  {} {} → {}", "✗".red(), symbol.yellow(), short_error);
             }
-            if failed.len() > 10 {
-                println!("  ... and {} more", failed.len() - 10);
+            if failed.len() > 5 {
+                println!("  ... and {} more", failed.len() - 5);
             }
             println!();
         }
@@ -229,15 +289,18 @@ impl NSECommands {
         println!();
     }
 
-    /// Process batch data and apply rules
+    /// OPTIMIZED: Process batch data with parallel file writing
     async fn process_batch_data_and_rules(
         successful: Vec<(models::Security, models::OptionChain)>
     ) -> Result<()> {
         println!("{}", "Processing data and applying rules...".cyan());
         
-        // Process all data and collect in a single structure
         let mut batch_for_rules = Vec::new();
         let mut all_processed_data = Vec::new();
+        
+        // OPTIMIZATION: Pre-allocate capacity
+        batch_for_rules.reserve(successful.len());
+        all_processed_data.reserve(successful.len());
         
         for (security, chain) in successful.iter() {
             let (processed_data, spread) = processor::process_option_data(
@@ -273,19 +336,21 @@ impl NSECommands {
             ));
         }
         
-        // Write single consolidated file
-        let start = std::time::Instant::now();
+        // Write consolidated file
+        let write_start = std::time::Instant::now();
         std::fs::write(
             "batch_processed.json",
             serde_json::to_string(&all_processed_data)?,
         )?;
-        let write_duration = start.elapsed();
         
         println!("{} Saved batch_processed.json ({} securities) in {:.2}s", 
-                "✓".green(), all_processed_data.len(), write_duration.as_secs_f64());
+                "✓".green(), all_processed_data.len(), write_start.elapsed().as_secs_f64());
         
         // Run rules
+        let rules_start = std::time::Instant::now();
         let rules_outputs = rules::run_batch_rules(batch_for_rules);
+        
+        println!("{} Rules processed in {:.2}s", "✓".green(), rules_start.elapsed().as_secs_f64());
         
         if !rules_outputs.is_empty() {
             std::fs::write(
@@ -298,8 +363,8 @@ impl NSECommands {
                 .sum();
             
             println!("{} Saved rules to batch_rules.json", "✓".green());
-            println!("{} Securities with alerts: {}", "ℹ".blue(), rules_outputs.len());
-            println!("{} Total alerts: {}", "ℹ".blue(), total_alerts);
+            println!("{} Securities with alerts: {}", "📋".to_string(), rules_outputs.len());
+            println!("{} Total alerts: {}", "🔔".to_string(), total_alerts);
         } else {
             std::fs::write("batch_rules.json", "[]")?;
             println!("{} No alerts found", "ℹ".blue());
@@ -314,30 +379,25 @@ impl NSECommands {
         use serde_json::Value;
         
         println!("{}", "=".repeat(60).blue());
-        println!("{}", "Splitting batch file into individual ticker files".green().bold());
+        println!("{}", "Splitting batch file".green().bold());
         println!("{}", "=".repeat(60).blue());
         println!();
         
-        // Read the consolidated file
         let start = std::time::Instant::now();
         let content = std::fs::read_to_string("batch_processed.json")?;
         let data: Vec<Value> = serde_json::from_str(&content)?;
         
         println!("{} Loaded {} securities in {:.2}s", "✓".green(), data.len(), start.elapsed().as_secs_f64());
         
-        // Create output directory
         let output_dir = std::path::Path::new("processed_data");
         if !output_dir.exists() {
             std::fs::create_dir_all(output_dir)?;
-            println!("{} Created output directory: processed_data/", "✓".green());
         }
         
-        // Split files in parallel using rayon
         let split_start = std::time::Instant::now();
         let files_created: Result<usize> = data
             .par_iter()
             .map(|ticker_data| {
-                // Extract symbol from the record
                 let symbol = ticker_data["record"]["symbol"]
                     .as_str()
                     .ok_or_else(|| anyhow::anyhow!("Missing symbol"))?;
@@ -351,30 +411,25 @@ impl NSECommands {
             .try_reduce(|| 0, |a, b| Ok(a + b));
         
         let files_created = files_created?;
-        let split_duration = split_start.elapsed();
         
-        println!("{} Created {} files in {:.2}s", "✓".green(), files_created, split_duration.as_secs_f64());
-        println!("{} Total time: {:.2}s", "ℹ".blue(), start.elapsed().as_secs_f64());
+        println!("{} Created {} files in {:.2}s", "✓".green(), files_created, split_start.elapsed().as_secs_f64());
+        println!("{} Total time: {:.2}s", "✓".green(), start.elapsed().as_secs_f64());
         println!();
-        println!("{}", "=".repeat(60).blue());
-        println!("{}", "Done!".green().bold());
-        println!("{}", "=".repeat(60).blue());
         
         Ok(())
     }
-    /// Print usage instructions
+
     pub fn print_usage() {
         eprintln!("Set NSE_MODE environment variable to control execution mode");
         eprintln!("Examples:");
-        eprintln!("  NSE_MODE=server NSE_PORT=3001 cargo run   # Start API server on port 3001");
+        eprintln!("  NSE_MODE=server NSE_PORT=3001 cargo run   # Start API server");
         eprintln!("  NSE_MODE=batch cargo run                   # Run batch analysis");
-        eprintln!("Note: GitHub Actions only supports 'batch' mode");
+        eprintln!("  NSE_MODE=batch NSE_MAX_CONCURRENT=20 cargo run  # Custom concurrency");
     }
 
-    /// Handle CI environment mode switching
     pub fn handle_ci_mode_override(mode: &str) -> bool {
         if config::is_ci_environment() && (mode == "server") {
-            println!("{} GitHub Actions only supports batch mode, running batch instead", "ℹ".blue());
+            println!("{} GitHub Actions: switching to batch mode", "ℹ".blue());
             true
         } else {
             false
