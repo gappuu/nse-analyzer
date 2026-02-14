@@ -5,3 +5,18 @@ compatibility_date = "2024-01-01"
 [triggers]
 # crons = ["3 5-10 * * 1-5"] 
 crons = ["0 5-10 * * 2-6"] # this is in cloudflare's terminology
+
+[observability]
+enabled = false
+head_sampling_rate = 1
+
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+persist = true
+invocation_logs = true
+
+[observability.traces]
+enabled = false
+persist = true
+head_sampling_rate = 1
