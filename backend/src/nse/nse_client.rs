@@ -1,12 +1,12 @@
 // ============================================
 // PERFORMANCE OPTIMIZATIONS SUMMARY:
 // ============================================
-// 1. ✅ Expiry caching (saves ~48% of API calls)
-// 2. ✅ Increased concurrency limits (3x parallelism)
-// 3. ✅ Streaming batch processing (futures::stream)
-// 4. ✅ Reduced retry attempts for CI (faster failures)
-// 5. ✅ Connection pooling via keep-alive (HTTP/1.1)
-// 6. ✅ Parallel processing with buffer_unordered
+// 1. ✅ Adaptive concurrency (1 → max after cache)
+// 2. ✅ Expiry caching (saves ~48% of API calls)
+// 3. ✅ Increased concurrency limits (3x parallelism)
+// 4. ✅ Streaming batch processing (futures::stream)
+// 5. ✅ Reduced retry attempts for CI (faster failures)
+// 6. ✅ Connection pooling via keep-alive (HTTP/1.1)
 // 7. ✅ Reduced logging overhead in CI
 // ============================================
 
@@ -204,7 +204,8 @@ impl NSEClient {
     }
 
     // -----------------------------------------------
-    // OPTIMIZED: Fetch with caching for equities
+    // OPTIMIZED: Fetch with aggressive caching for equities
+    // Strategy: First equity populates cache, rest reuse it
     // -----------------------------------------------
     async fn fetch_contract_info_with_cache(&self, security: &Security) -> Result<String> {
         match security.security_type {
@@ -336,19 +337,66 @@ impl NSEClient {
     }
 
     // -----------------------------------------------
-    // ULTRA-OPTIMIZED BATCH FETCH WITH STREAMING
+    // ULTRA-OPTIMIZED BATCH FETCH WITH ADAPTIVE CONCURRENCY
     // -----------------------------------------------
     pub async fn fetch_all_option_chains(
         self: Arc<Self>,
         securities: Vec<Security>,
         max_concurrent: usize,
     ) -> Vec<Result<(Security, OptionChain)>> {
-        // OPTIMIZATION: Use futures::stream for better concurrency control
-        let results: Vec<Result<(Security, OptionChain)>> = stream::iter(securities)
+        if securities.is_empty() {
+            return Vec::new();
+        }
+
+        // OPTIMIZATION: Process first equity sequentially to cache expiry
+        let mut results = Vec::with_capacity(securities.len());
+        let mut remaining_securities = securities;
+        
+        // Find first equity to process sequentially
+        let first_equity_idx = remaining_securities
+            .iter()
+            .position(|s| matches!(s.security_type, SecurityType::Equity));
+        
+        if let Some(idx) = first_equity_idx {
+            // Process first equity to populate cache
+            let first_equity = remaining_securities.remove(idx);
+            
+            if config::is_ci_environment() {
+                println!("{} Processing first equity '{}' to cache expiry...", 
+                    "🔍".to_string(), first_equity.symbol);
+            }
+            
+            let client = Arc::clone(&self);
+            let result = async move {
+                let expiry = client.fetch_contract_info_with_cache(&first_equity).await?;
+                let chain = client.fetch_option_chain(&first_equity, &expiry).await?;
+                Ok((first_equity, chain))
+            }.await;
+            
+            // Check if cache was populated
+            let cache_populated = self.cached_equity_expiry.read().await.is_some();
+            
+            if config::is_ci_environment() {
+                if cache_populated {
+                    if let Ok((ref sec, _)) = result {
+                        println!("{} Expiry cached from '{}' - switching to parallel mode (concurrency: {})", 
+                            "⚡".to_string(), sec.symbol, max_concurrent);
+                    }
+                } else {
+                    println!("{} Cache not populated, proceeding with parallel mode anyway", 
+                        "⚠".to_string());
+                }
+            }
+            
+            results.push(result);
+        }
+        
+        // OPTIMIZATION: Now process remaining securities in parallel
+        let parallel_results: Vec<Result<(Security, OptionChain)>> = stream::iter(remaining_securities)
             .map(|security| {
                 let client = Arc::clone(&self);
                 async move {
-                    // Fetch expiry (cached for equities)
+                    // Fetch expiry (will use cache for equities after first one)
                     let expiry = client.fetch_contract_info_with_cache(&security).await?;
                     
                     // Fetch option chain
@@ -357,10 +405,12 @@ impl NSEClient {
                     Ok((security, chain))
                 }
             })
-            .buffer_unordered(max_concurrent) // OPTIMIZATION: Process in parallel with limit
+            .buffer_unordered(max_concurrent) // Full parallelism for remaining
             .collect()
             .await;
-
+        
+        // Combine results
+        results.extend(parallel_results);
         results
     }
 }
