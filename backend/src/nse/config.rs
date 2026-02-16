@@ -66,7 +66,7 @@ pub const GITHUB_ACTIONS_TIMEOUT_SECS: u64 = 750;
 // CONCURRENCY LIMITS
 // -----------------------------------------------
 pub const DEFAULT_MAX_CONCURRENT: usize = 6;
-pub const CI_MAX_CONCURRENT: usize = 10; 
+pub const CI_MAX_CONCURRENT: usize = 8; 
 // -----------------------------------------------
 // RATE LIMITING (if needed)
 // -----------------------------------------------
