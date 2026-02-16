@@ -137,32 +137,21 @@ jobs:
         npm install -g vercel@latest
         npm install @vercel/blob
     
-    - name: Upload batch_rules.json and processed_data to Vercel Blob
+    - name: Upload batch_rules.json and compressed processed_data to Vercel Blob
       if: ${{ env.ANALYSIS_SUCCESS == 'true' }}
       working-directory: backend
       env:
         BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
       run: |
         cat > upload-blob.mjs << 'EOF'
-        import { put, list, del } from '@vercel/blob';
-        import { readFileSync, readdirSync, appendFileSync } from 'fs';
+        import { put } from '@vercel/blob';
+        import { readFileSync, readdirSync, appendFileSync, writeFileSync, unlinkSync } from 'fs';
         import { join } from 'path';
+        import { createGzip } from 'zlib';
+        import { pipeline } from 'stream/promises';
+        import { createReadStream, createWriteStream } from 'fs';
         
-        // Step 1: Clean up old processed_data files
-        console.log('🧹 Cleaning up old processed_data files...');
-        const oldFiles = await list({
-          prefix: 'data/processed_data/',
-          token: process.env.BLOB_READ_WRITE_TOKEN,
-        });
-        
-        let deletedCount = 0;
-        for (const file of oldFiles.blobs) {
-          await del(file.url, { token: process.env.BLOB_READ_WRITE_TOKEN });
-          deletedCount++;
-        }
-        console.log(`✓ Deleted ${deletedCount} old files\n`);
-        
-        // Step 2: Upload batch_rules.json
+        // Step 1: Upload batch_rules.json (uncompressed, overwrites existing)
         const batchRulesContent = readFileSync('batch_rules.json', 'utf-8');
         const batchRulesBlob = await put('data/batch_rules.json', batchRulesContent, {
           access: 'public',
@@ -173,45 +162,75 @@ jobs:
         
         console.log('✅ Uploaded batch_rules.json to Vercel Blob');
         console.log('URL:', batchRulesBlob.url);
-        console.log('Pathname:', batchRulesBlob.pathname);
         
-        // Step 3: Upload all files from processed_data directory
+        // Step 2: Create a combined JSON object with all processed_data
         const processedDataDir = 'processed_data';
-        const files = readdirSync(processedDataDir);
+        const files = readdirSync(processedDataDir).filter(f => f.endsWith('.json'));
         
-        console.log(`\n📁 Uploading ${files.length} files from processed_data/...`);
+        console.log(`\n📦 Combining ${files.length} files from processed_data/...`);
         
-        let uploadedCount = 0;
-        const uploadedFiles = [];
-        
+        const combinedData = {};
         for (const file of files) {
-          if (file.endsWith('.json')) {
-            const filePath = join(processedDataDir, file);
-            const fileContent = readFileSync(filePath, 'utf-8');
-            
-            const blob = await put(`data/processed_data/${file}`, fileContent, {
-              access: 'public',
-              token: process.env.BLOB_READ_WRITE_TOKEN,
-              addRandomSuffix: false,
-            });
-            
-            uploadedCount++;
-            uploadedFiles.push(file);
-            console.log(`✓ Uploaded ${file}`);
-          }
+          const ticker = file.replace('.json', '');
+          const filePath = join(processedDataDir, file);
+          const fileContent = JSON.parse(readFileSync(filePath, 'utf-8'));
+          combinedData[ticker] = fileContent;
         }
         
-        console.log(`\n✅ Successfully uploaded ${uploadedCount} ticker files to Vercel Blob`);
-        console.log('Files:', uploadedFiles.join(', '));
+        // Step 3: Compress the combined JSON
+        console.log('🗜️  Compressing combined data...');
+        const combinedJson = JSON.stringify(combinedData);
+        const uncompressedSize = Buffer.byteLength(combinedJson);
+        
+        // Write to temp file and compress
+        const tempJsonPath = 'temp_combined.json';
+        const tempGzPath = 'temp_combined.json.gz';
+        
+        writeFileSync(tempJsonPath, combinedJson);
+        
+        await pipeline(
+          createReadStream(tempJsonPath),
+          createGzip({ level: 9 }),
+          createWriteStream(tempGzPath)
+        );
+        
+        const compressedSize = readFileSync(tempGzPath).length;
+        const compressionRatio = ((1 - compressedSize / uncompressedSize) * 100).toFixed(1);
+        
+        console.log(`   Uncompressed: ${(uncompressedSize / 1024 / 1024).toFixed(2)} MB`);
+        console.log(`   Compressed: ${(compressedSize / 1024 / 1024).toFixed(2)} MB`);
+        console.log(`   Compression: ${compressionRatio}% reduction`);
+        
+        // Step 4: Upload compressed file to Vercel Blob (overwrites existing)
+        const compressedContent = readFileSync(tempGzPath);
+        const compressedBlob = await put('data/processed_data.json.gz', compressedContent, {
+          access: 'public',
+          token: process.env.BLOB_READ_WRITE_TOKEN,
+          addRandomSuffix: false,
+          contentType: 'application/gzip',
+          allowOverwrite: true,
+        });
+        
+        console.log(`\n✅ Successfully uploaded compressed data to Vercel Blob`);
+        console.log('URL:', compressedBlob.url);
+        console.log(`Files included: ${files.length} tickers`);
+        
+        // Clean up temp files
+        unlinkSync(tempJsonPath);
+        unlinkSync(tempGzPath);
         
         // Save info to GitHub environment
         appendFileSync(process.env.GITHUB_ENV, `BLOB_BATCH_RULES_URL=${batchRulesBlob.url}\n`);
-        appendFileSync(process.env.GITHUB_ENV, `BLOB_TICKER_COUNT=${uploadedCount}\n`);
-        appendFileSync(process.env.GITHUB_ENV, `BLOB_DELETED_COUNT=${deletedCount}\n`);
+        appendFileSync(process.env.GITHUB_ENV, `BLOB_COMPRESSED_URL=${compressedBlob.url}\n`);
+        appendFileSync(process.env.GITHUB_ENV, `BLOB_TICKER_COUNT=${files.length}\n`);
+        appendFileSync(process.env.GITHUB_ENV, `BLOB_UNCOMPRESSED_SIZE=${(uncompressedSize / 1024 / 1024).toFixed(2)}\n`);
+        appendFileSync(process.env.GITHUB_ENV, `BLOB_COMPRESSED_SIZE=${(compressedSize / 1024 / 1024).toFixed(2)}\n`);
+        appendFileSync(process.env.GITHUB_ENV, `BLOB_COMPRESSION_RATIO=${compressionRatio}\n`);
         EOF
         
         node upload-blob.mjs
         
+    
     - name: Trigger Vercel Deployment
       if: ${{ env.ANALYSIS_SUCCESS == 'true' }}
       run: |
