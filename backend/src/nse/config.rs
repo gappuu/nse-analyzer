@@ -52,7 +52,7 @@ pub const WARMUP_DELAY_MS: u64 = 200;
 // -----------------------------------------------
 // RETRY CONFIG
 // -----------------------------------------------
-pub const RETRY_BASE_DELAY_MS: u64 = 180;
+pub const RETRY_BASE_DELAY_MS: u64 = 200;
 pub const RETRY_FACTOR: u64 = 3;
 pub const RETRY_MAX_DELAY_SECS: u64 = 5;
 pub const RETRY_MAX_ATTEMPTS: usize = 5;
@@ -60,13 +60,13 @@ pub const RETRY_MAX_ATTEMPTS: usize = 5;
 // -----------------------------------------------
 // GITHUB ACTIONS TIMEOUT CONFIG
 // -----------------------------------------------
-pub const GITHUB_ACTIONS_TIMEOUT_SECS: u64 = 750; 
+pub const GITHUB_ACTIONS_TIMEOUT_SECS: u64 = 200; 
 
 // -----------------------------------------------
 // CONCURRENCY LIMITS
 // -----------------------------------------------
-pub const DEFAULT_MAX_CONCURRENT: usize = 6;
-pub const CI_MAX_CONCURRENT: usize = 8; 
+pub const DEFAULT_MAX_CONCURRENT: usize = 5;
+pub const CI_MAX_CONCURRENT: usize = 5; 
 // -----------------------------------------------
 // RATE LIMITING (if needed)
 // -----------------------------------------------
